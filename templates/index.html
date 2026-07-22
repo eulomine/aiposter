@@ -181,7 +181,8 @@
 
         .pptx-info {
             background: #1a2a3a; padding: 16px; border-radius: 10px;
-            margin-top: 16px; border: 1px solid #2a4a6a; font-size: 0.85rem; line-height: 1.6; color: #a0c0e0;
+            margin-top: 16px; border: 1px solid #2a4a6a; font-size: 0.85rem;
+            line-height: 1.6; color: #a0c0e0;
         }
 
         @media (max-width: 600px) {
@@ -256,15 +257,17 @@
                 ⚠️ 입력하지 않은 항목은 포스터에 표시되지 않습니다. AI가 임의로 전화번호, 이메일 등을 만들어내지 않습니다.
             </p>
             <label for="title">제목 (필수)</label>
-            <input type="text" id="title" placeholder="예: 여름 아웃리치">
+            <input type="text" id="title" placeholder="예: 청소년부 2026년 수련회">
+            <label for="subtitle">부제 (선택)</label>
+            <input type="text" id="subtitle" placeholder="예: 성전을 재건하라!">
             <label for="date">날짜 / 시간</label>
-            <input type="text" id="date" placeholder="예: 2026년 8월 7일(금) - 9일(일)">
+            <input type="text" id="date" placeholder="예: 2026년 7월 23일">
             <label for="venue">장소</label>
-            <input type="text" id="venue" placeholder="예: 전라남도 신안군 도초도, 비금도 일대">
+            <input type="text" id="venue" placeholder="예: 신광교회">
             <label for="organizer">주관</label>
-            <input type="text" id="organizer" placeholder="예: 이리신광교회">
-            <label for="content">반드시 들어갈 내용 (줄바꿈으로 구분하면 각각 별도 텍스트로 배치됩니다)</label>
-            <textarea id="content" placeholder="예:&#10;성도님들의 참여를 기다립니다!&#10;모집 부문: 미용봉사, 태양광 설치, 마을청소, 어린이 성경학교&#10;신청 기간: 7월 말까지&#10;문의: 사무실 및 담당 교역자"></textarea>
+            <input type="text" id="organizer" placeholder="예: 중고등부">
+            <label for="content">반드시 들어갈 내용 (줄바꿈으로 구분 → 각각 별도 텍스트 박스로 배치)</label>
+            <textarea id="content" placeholder="예:&#10;성도님들의 참여를 기다립니다!&#10;모집 부문: 미용봉사, 태양광 설치&#10;신청 기간: 7월 말까지"></textarea>
             <label for="additional">AI에게 맡길 추가 표현</label>
             <textarea id="additional" placeholder="예: 시원한 여름 느낌의 캐치프레이즈를 만들어줘"></textarea>
         </div>
@@ -378,7 +381,7 @@ const PRESETS = {
     "custom":         { name: "✏️ 커스텀",    w: 0,      h: 0 },
 };
 
-const STYLE_PRESETS = {
+const STYLE_PRESETS_UI = {
     "cute_illust": "귀여운 일러스트",
     "corporate":   "깔끔한 기업형",
     "photo_real":  "실사 사진풍",
@@ -437,7 +440,7 @@ function buildSizeGrid() {
 
 function buildStyleGrid() {
     const grid = document.getElementById('styleGrid');
-    for (const [key, name] of Object.entries(STYLE_PRESETS)) {
+    for (const [key, name] of Object.entries(STYLE_PRESETS_UI)) {
         const card = document.createElement('div');
         card.className = 'style-card'; card.dataset.key = key;
         card.textContent = name;
@@ -461,14 +464,16 @@ function selectSize(key) {
         const gemR = (rw / rh).toFixed(3);
         const diff = Math.abs(actual - gemR) / actual * 100;
         ratioInfo.classList.add('visible');
+        let html = '';
         if (diff < 1) {
-            ratioInfo.innerHTML = `<span class="match">✅ 완벽 매칭!</span> ${p.w}×${p.h}cm → Gemini 비율: <strong>${ratio}</strong>`;
+            html = `<span class="match">✅ 완벽 매칭!</span> ${p.w}×${p.h}cm → Gemini 비율: <strong>${ratio}</strong>`;
         } else {
-            ratioInfo.innerHTML = `<span class="warn">⚠️ 근사 매칭</span> ${p.w}×${p.h}cm → Gemini: <strong>${ratio}</strong> — 차이 ${diff.toFixed(1)}%`;
+            html = `<span class="warn">⚠️ 근사 매칭</span> ${p.w}×${p.h}cm → Gemini: <strong>${ratio}</strong> — 차이 ${diff.toFixed(1)}%`;
         }
         if (p.w > 142 || p.h > 142) {
-            ratioInfo.innerHTML += `<br><span style="color:#fa0; font-size:0.8rem;">📐 PPTX 최대 제한(142cm)을 초과합니다. 비율 유지하며 축소된 PPTX가 생성됩니다.</span>`;
+            html += `<br><span style="color:#fa0; font-size:0.8rem;">📐 PPTX 최대 제한(142cm)을 초과합니다. 비율 유지하며 축소된 PPTX가 생성됩니다.</span>`;
         }
+        ratioInfo.innerHTML = html;
     }
 }
 
@@ -581,11 +586,14 @@ async function submitPlan() {
         if (unit === 'm') { w *= 100; h *= 100; }
         if (unit === 'mm') { w /= 10; h /= 10; }
         formData.append('size_type', 'custom');
-        formData.append('custom_width', w); formData.append('custom_height', h);
+        formData.append('custom_width', w);
+        formData.append('custom_height', h);
     } else {
-        formData.append('size_type', 'preset'); formData.append('preset', selectedPreset);
+        formData.append('size_type', 'preset');
+        formData.append('preset', selectedPreset);
     }
     formData.append('title', document.getElementById('title').value);
+    formData.append('subtitle', document.getElementById('subtitle').value);
     formData.append('date', document.getElementById('date').value);
     formData.append('venue', document.getElementById('venue').value);
     formData.append('organizer', document.getElementById('organizer').value);
@@ -593,10 +601,12 @@ async function submitPlan() {
     formData.append('additional', document.getElementById('additional').value);
     formData.append('mood', document.getElementById('mood').value);
     formData.append('font_color', document.getElementById('fontColor').value.replace('#', ''));
+
     const refFile = document.getElementById('refImage').files[0];
     if (refFile) formData.append('reference_image', refFile);
     const fontFile = document.getElementById('fontFile').files[0];
     if (fontFile) formData.append('font_file', fontFile);
+
     uploadedImages.forEach((item, idx) => {
         formData.append(`upload_image_${idx}`, item.file);
         formData.append(`upload_desc_${idx}`, item.description);
@@ -627,7 +637,8 @@ async function submitRevise() {
     const fb = document.getElementById('feedback').value.trim();
     if (!fb) { alert('수정할 내용을 입력해주세요!'); return; }
     const formData = new FormData();
-    formData.append('sid', currentSid); formData.append('feedback', fb);
+    formData.append('sid', currentSid);
+    formData.append('feedback', fb);
     document.getElementById('loading2').classList.add('visible');
     document.getElementById('previewArea').style.display = 'none';
     try {
@@ -664,7 +675,6 @@ async function goToStep3() {
                 <a href="/download/${sid}/background">🎨 배경 이미지 (텍스트 제거)</a>
             `;
 
-            // 인쇄 크기 안내
             const printArea = document.getElementById('printInfoArea');
             if (result.print_info) {
                 const pi = result.print_info;
@@ -694,11 +704,8 @@ if (savedKey) {
 }
 document.getElementById('apiKey').addEventListener('change', function() {
     const key = this.value.trim();
-    if (key) {
-        localStorage.setItem('gemini_api_key', key);
-    } else {
-        localStorage.removeItem('gemini_api_key');
-    }
+    if (key) localStorage.setItem('gemini_api_key', key);
+    else localStorage.removeItem('gemini_api_key');
 });
 </script>
 </body>
