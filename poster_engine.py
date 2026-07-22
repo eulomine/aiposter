@@ -2,8 +2,8 @@
 poster_engine.py
 포스터 생성 엔진 — 사이즈 관리, Gemini API 호출, PPTX 조립
 모든 작업을 메모리에서 처리 (디스크 저장 없음)
-v3: blank_layout 버그 수정, 절대 규칙 프롬프트, 텍스트 세분화,
-    스타일 프리셋, 3슬라이드 구조, 재시도 로직, PPTX 크기 제한
+v4: blank_layout 수정, 절대 규칙, 부제 지원, 배경 프롬프트 개선,
+    텍스트 세분화, 스타일 프리셋, 3슬라이드, 재시도, PPTX 크기 제한
 """
 
 import base64
@@ -119,29 +119,22 @@ def init_gemini(api_key: str):
 
 
 def validate_api_key(client):
-    """API 키 유효성 간단 체크"""
     try:
         client.models.generate_content(
             model="gemini-3.5-flash",
             contents="Say OK",
-            config=types.GenerateContentConfig(
-                max_output_tokens=5,
-            ),
+            config=types.GenerateContentConfig(max_output_tokens=5),
         )
         return True
     except Exception as e:
         if "API key not valid" in str(e):
             return False
-        return True  # 다른 에러는 키 문제가 아님
+        return True
 
 
 def generate_image(client, prompt, aspect_ratio, image_size="2K",
                    ref_image_bytes=None, model="gemini-3.1-flash-image",
                    max_retries=3):
-    """
-    Gemini로 이미지를 생성하고 bytes를 반환.
-    실패 시 max_retries만큼 재시도.
-    """
     last_error = None
     for attempt in range(max_retries + 1):
         try:
@@ -177,42 +170,48 @@ def generate_image(client, prompt, aspect_ratio, image_size="2K",
 def generate_text_plan(client, poster_info, model="gemini-3.5-flash"):
     """텍스트 모델로 디자인 계획 생성 — 절대 규칙 포함"""
 
-    # 업로드 이미지 유무에 따른 지시
     upload_desc = poster_info.get('upload_descriptions', '없음')
     has_uploads = upload_desc != '없음' and upload_desc.strip()
 
     if has_uploads:
         upload_instruction = f"""업로드된 이미지: {upload_desc}
-- 각 이미지의 설명을 참고하여 적절한 위치에 배치를 계획하세요.
-- 업로드된 이미지는 PPTX에서 별도로 배치되므로, AI 배경 이미지에는 해당 이미지 자리를 비워둘 필요가 없습니다."""
+- 각 이미지의 설명을 참고하여 적절한 위치에 배치를 계획하세요."""
     else:
         upload_instruction = """업로드된 이미지: 없음
 - 로고, 사진, QR코드 등의 공간을 미리 확보하지 마세요.
-- 이미지 업로드가 없으므로 전체를 그래픽과 텍스트로만 구성하세요."""
+- 전체를 그래픽과 텍스트로만 구성하세요."""
+
+    # 입력된 항목만 정보에 포함
+    info_items = []
+    for key, label in [
+        ('title', '제목'), ('subtitle', '부제'), ('date', '날짜'),
+        ('venue', '장소'), ('organizer', '주관'), ('content', '내용'),
+        ('additional', 'AI 추가 표현 요청'),
+    ]:
+        val = poster_info.get(key, '')
+        if val and val.strip():
+            info_items.append(f"- {label}: {val}")
+
+    info_block = "\n".join(info_items) if info_items else "- (입력된 정보 없음)"
 
     prompt = f"""당신은 전문 포스터 디자이너입니다. 다음 정보로 포스터 디자인을 계획해주세요.
 
 [절대 규칙 — 반드시 지키세요]
-1. 사용자가 직접 입력하지 않은 정보(전화번호, 이메일, 홈페이지, 등록방법, 문의처, 담당자 이름 등)는 절대 포함하지 마세요. 추측하거나 임의로 만들어내지 마세요.
-2. 아래 '포스터 정보'에 빈 칸이거나 없는 항목은 디자인에서 완전히 제외하세요.
-3. 업로드된 이미지가 없으면 로고 공간, 사진 공간, QR코드 공간을 만들지 마세요.
+1. 아래에 직접 입력된 정보만 사용하세요. 전화번호, 이메일, 홈페이지, 등록방법, 문의처, 담당자 이름 등을 추측하거나 임의로 만들어내지 마세요.
+2. 아래에 없는 항목은 디자인에서 완전히 제외하세요.
+3. 업로드된 이미지가 없으면 로고/사진/QR코드 공간을 만들지 마세요.
 
 포스터 정보:
-- 제목: {poster_info.get('title', '')}
-- 날짜: {poster_info.get('date', '')}
-- 장소: {poster_info.get('venue', '')}
-- 내용: {poster_info.get('content', '')}
-- 주관: {poster_info.get('organizer', '')}
+{info_block}
 - 분위기/스타일: {poster_info.get('mood', '')}
 - 크기: {poster_info.get('size_name', '')} (비율: {poster_info.get('gemini_ratio', '')})
-- AI 추가 표현 요청: {poster_info.get('additional', '')}
 {upload_instruction}
 
 다음을 포함해서 답변해주세요:
 1. 전체 분위기와 색감 설명
 2. 배경 이미지 생성용 프롬프트 (영어, 상세하게)
-3. 텍스트 배치 계획 (위치, 크기, 색상) — 사용자가 입력한 항목만
-4. 업로드 이미지가 있을 경우에만 이미지 배치 위치와 크기 제안
+3. 텍스트 배치 계획 (위치, 크기, 색상) — 입력된 항목만
+4. 업로드 이미지가 있을 경우에만 이미지 배치 제안
 5. 추천 장식 요소"""
 
     response = client.models.generate_content(model=model, contents=prompt)
@@ -220,7 +219,7 @@ def generate_text_plan(client, poster_info, model="gemini-3.5-flash"):
 
 
 # ============================================================
-# 4. PPTX 생성 — 3슬라이드 구조 (메모리에서 처리)
+# 4. PPTX 생성 — 3슬라이드 구조
 # ============================================================
 
 def create_poster_pptx(
@@ -234,18 +233,8 @@ def create_poster_pptx(
     actual_width_cm=None,
     actual_height_cm=None,
 ):
-    """
-    PPTX를 메모리에서 생성하여 BytesIO로 반환.
-
-    슬라이드 1: 편집용 (배경 + 텍스트 박스)
-    슬라이드 2: 원본 활용용 (AI 원본 이미지, 텍스트 포함)
-    슬라이드 3: 참고용 레퍼런스
-
-    actual_width_cm / actual_height_cm: 실제 인쇄 크기 (축소된 경우 메모에 표시)
-    """
     prs = Presentation()
 
-    # PPTX 최대 크기: 56인치 (≈142cm)
     MAX_CM = 142.0
     pptx_scale = 1.0
     if width_cm > MAX_CM or height_cm > MAX_CM:
@@ -256,7 +245,6 @@ def create_poster_pptx(
     prs.slide_width = Cm(width_cm)
     prs.slide_height = Cm(height_cm)
 
-    # ★ 빈 슬라이드 레이아웃 가져오기 (이전 버그 수정)
     blank_layout = prs.slide_layouts[6]
 
     # ── 슬라이드 1: 편집용 포스터 ──
@@ -266,7 +254,12 @@ def create_poster_pptx(
         width=Cm(width_cm), height=Cm(height_cm)
     )
 
-    # 텍스트 박스 배치
+    align_map = {
+        "left": PP_ALIGN.LEFT,
+        "center": PP_ALIGN.CENTER,
+        "right": PP_ALIGN.RIGHT,
+    }
+
     for t in texts:
         txBox = slide1.shapes.add_textbox(
             Cm(t["x_cm"]), Cm(t["y_cm"]),
@@ -281,14 +274,8 @@ def create_poster_pptx(
         p.font.bold = t.get("bold", False)
         color_hex = t.get("font_color", "FFFFFF")
         p.font.color.rgb = RGBColor.from_string(color_hex)
-        align_map = {
-            "left": PP_ALIGN.LEFT,
-            "center": PP_ALIGN.CENTER,
-            "right": PP_ALIGN.RIGHT,
-        }
         p.alignment = align_map.get(t.get("align", "center"), PP_ALIGN.CENTER)
 
-    # 업로드 이미지 배치
     if upload_images:
         for img in upload_images:
             slide1.shapes.add_picture(
@@ -297,7 +284,6 @@ def create_poster_pptx(
                 width=Cm(img["width_cm"]), height=Cm(img["height_cm"]),
             )
 
-    # 실제 인쇄 크기가 다른 경우 메모 추가
     if actual_width_cm and actual_height_cm and pptx_scale < 1.0:
         note_w = min(width_cm - 2, 30)
         size_note = slide1.shapes.add_textbox(Cm(1), Cm(height_cm - 4), Cm(note_w), Cm(3))
@@ -306,7 +292,7 @@ def create_poster_pptx(
         sp.font.size = Pt(10)
         sp.font.color.rgb = RGBColor(255, 200, 0)
 
-    # ── 슬라이드 2: 원본 활용용 (AI 텍스트 포함 이미지) ──
+    # ── 슬라이드 2: 원본 활용용 ──
     slide2 = prs.slides.add_slide(blank_layout)
     slide2.shapes.add_picture(
         BytesIO(original_bytes), Cm(0), Cm(0),
@@ -319,7 +305,7 @@ def create_poster_pptx(
     note_p.font.size = Pt(12)
     note_p.font.color.rgb = RGBColor(255, 165, 0)
 
-    # ── 슬라이드 3: 참고용 완성 이미지 ──
+    # ── 슬라이드 3: 참고용 ──
     slide3 = prs.slides.add_slide(blank_layout)
     slide3.shapes.add_picture(
         BytesIO(reference_bytes), Cm(0), Cm(0),
