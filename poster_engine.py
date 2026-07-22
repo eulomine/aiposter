@@ -2,7 +2,8 @@
 poster_engine.py
 포스터 생성 엔진 — 사이즈 관리, Gemini API 호출, PPTX 조립
 모든 작업을 메모리에서 처리 (디스크 저장 없음)
-v2: 텍스트 세분화, 스타일 프리셋, 3슬라이드 구조, 재시도 로직
+v3: blank_layout 버그 수정, 절대 규칙 프롬프트, 텍스트 세분화,
+    스타일 프리셋, 3슬라이드 구조, 재시도 로직, PPTX 크기 제한
 """
 
 import base64
@@ -174,8 +175,27 @@ def generate_image(client, prompt, aspect_ratio, image_size="2K",
 
 
 def generate_text_plan(client, poster_info, model="gemini-3.5-flash"):
-    """텍스트 모델로 디자인 계획 생성"""
+    """텍스트 모델로 디자인 계획 생성 — 절대 규칙 포함"""
+
+    # 업로드 이미지 유무에 따른 지시
+    upload_desc = poster_info.get('upload_descriptions', '없음')
+    has_uploads = upload_desc != '없음' and upload_desc.strip()
+
+    if has_uploads:
+        upload_instruction = f"""업로드된 이미지: {upload_desc}
+- 각 이미지의 설명을 참고하여 적절한 위치에 배치를 계획하세요.
+- 업로드된 이미지는 PPTX에서 별도로 배치되므로, AI 배경 이미지에는 해당 이미지 자리를 비워둘 필요가 없습니다."""
+    else:
+        upload_instruction = """업로드된 이미지: 없음
+- 로고, 사진, QR코드 등의 공간을 미리 확보하지 마세요.
+- 이미지 업로드가 없으므로 전체를 그래픽과 텍스트로만 구성하세요."""
+
     prompt = f"""당신은 전문 포스터 디자이너입니다. 다음 정보로 포스터 디자인을 계획해주세요.
+
+[절대 규칙 — 반드시 지키세요]
+1. 사용자가 직접 입력하지 않은 정보(전화번호, 이메일, 홈페이지, 등록방법, 문의처, 담당자 이름 등)는 절대 포함하지 마세요. 추측하거나 임의로 만들어내지 마세요.
+2. 아래 '포스터 정보'에 빈 칸이거나 없는 항목은 디자인에서 완전히 제외하세요.
+3. 업로드된 이미지가 없으면 로고 공간, 사진 공간, QR코드 공간을 만들지 마세요.
 
 포스터 정보:
 - 제목: {poster_info.get('title', '')}
@@ -186,13 +206,13 @@ def generate_text_plan(client, poster_info, model="gemini-3.5-flash"):
 - 분위기/스타일: {poster_info.get('mood', '')}
 - 크기: {poster_info.get('size_name', '')} (비율: {poster_info.get('gemini_ratio', '')})
 - AI 추가 표현 요청: {poster_info.get('additional', '')}
-- 업로드 이미지: {poster_info.get('upload_descriptions', '없음')}
+{upload_instruction}
 
 다음을 포함해서 답변해주세요:
 1. 전체 분위기와 색감 설명
 2. 배경 이미지 생성용 프롬프트 (영어, 상세하게)
-3. 텍스트 배치 계획 (위치, 크기, 색상)
-4. 업로드된 이미지(로고, 사진 등)의 권장 배치 위치와 크기
+3. 텍스트 배치 계획 (위치, 크기, 색상) — 사용자가 입력한 항목만
+4. 업로드 이미지가 있을 경우에만 이미지 배치 위치와 크기 제안
 5. 추천 장식 요소"""
 
     response = client.models.generate_content(model=model, contents=prompt)
@@ -211,26 +231,33 @@ def create_poster_pptx(
     texts,
     upload_images=None,
     title="poster",
+    actual_width_cm=None,
+    actual_height_cm=None,
 ):
     """
     PPTX를 메모리에서 생성하여 BytesIO로 반환.
-    
+
     슬라이드 1: 편집용 (배경 + 텍스트 박스)
     슬라이드 2: 원본 활용용 (AI 원본 이미지, 텍스트 포함)
     슬라이드 3: 참고용 레퍼런스
+
+    actual_width_cm / actual_height_cm: 실제 인쇄 크기 (축소된 경우 메모에 표시)
     """
     prs = Presentation()
-    
-    # PPTX 최대 크기: 56인치 (142.24cm)
+
+    # PPTX 최대 크기: 56인치 (≈142cm)
     MAX_CM = 142.0
-    scale = 1.0
+    pptx_scale = 1.0
     if width_cm > MAX_CM or height_cm > MAX_CM:
-        scale = min(MAX_CM / width_cm, MAX_CM / height_cm)
-        width_cm = width_cm * scale
-        height_cm = height_cm * scale
-    
+        pptx_scale = min(MAX_CM / width_cm, MAX_CM / height_cm)
+        width_cm = round(width_cm * pptx_scale, 2)
+        height_cm = round(height_cm * pptx_scale, 2)
+
     prs.slide_width = Cm(width_cm)
     prs.slide_height = Cm(height_cm)
+
+    # ★ 빈 슬라이드 레이아웃 가져오기 (이전 버그 수정)
+    blank_layout = prs.slide_layouts[6]
 
     # ── 슬라이드 1: 편집용 포스터 ──
     slide1 = prs.slides.add_slide(blank_layout)
@@ -238,6 +265,8 @@ def create_poster_pptx(
         BytesIO(background_bytes), Cm(0), Cm(0),
         width=Cm(width_cm), height=Cm(height_cm)
     )
+
+    # 텍스트 박스 배치
     for t in texts:
         txBox = slide1.shapes.add_textbox(
             Cm(t["x_cm"]), Cm(t["y_cm"]),
@@ -252,9 +281,14 @@ def create_poster_pptx(
         p.font.bold = t.get("bold", False)
         color_hex = t.get("font_color", "FFFFFF")
         p.font.color.rgb = RGBColor.from_string(color_hex)
-        align_map = {"left": PP_ALIGN.LEFT, "center": PP_ALIGN.CENTER, "right": PP_ALIGN.RIGHT}
+        align_map = {
+            "left": PP_ALIGN.LEFT,
+            "center": PP_ALIGN.CENTER,
+            "right": PP_ALIGN.RIGHT,
+        }
         p.alignment = align_map.get(t.get("align", "center"), PP_ALIGN.CENTER)
 
+    # 업로드 이미지 배치
     if upload_images:
         for img in upload_images:
             slide1.shapes.add_picture(
@@ -262,6 +296,15 @@ def create_poster_pptx(
                 Cm(img["x_cm"]), Cm(img["y_cm"]),
                 width=Cm(img["width_cm"]), height=Cm(img["height_cm"]),
             )
+
+    # 실제 인쇄 크기가 다른 경우 메모 추가
+    if actual_width_cm and actual_height_cm and pptx_scale < 1.0:
+        note_w = min(width_cm - 2, 30)
+        size_note = slide1.shapes.add_textbox(Cm(1), Cm(height_cm - 4), Cm(note_w), Cm(3))
+        sp = size_note.text_frame.paragraphs[0]
+        sp.text = f"📐 실제 인쇄 크기: {actual_width_cm} × {actual_height_cm} cm (PPTX 최대 제한으로 축소됨, 비율은 동일)"
+        sp.font.size = Pt(10)
+        sp.font.color.rgb = RGBColor(255, 200, 0)
 
     # ── 슬라이드 2: 원본 활용용 (AI 텍스트 포함 이미지) ──
     slide2 = prs.slides.add_slide(blank_layout)
