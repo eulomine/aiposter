@@ -106,7 +106,7 @@ def generate_image(client, prompt, aspect_ratio, image_size="2K",
     raise RuntimeError("Gemini가 이미지를 반환하지 않았습니다.")
 
 
-def generate_text_plan(client, poster_info, model="gemini-2.5-flash"):
+def generate_text_plan(client, poster_info, model="gemini-3.5-flash"):
     """텍스트 모델로 디자인 계획 생성"""
     prompt = f"""당신은 전문 포스터 디자이너입니다. 다음 정보로 포스터 디자인을 계획해주세요.
 
