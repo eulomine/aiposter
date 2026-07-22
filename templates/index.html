@@ -214,7 +214,8 @@
                 API 키가 없으신가요?
                 <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a>에서
                 무료로 발급받을 수 있습니다. (로그인 → Create API Key)<br>
-                입력한 키는 서버에 저장되지 않으며, 포스터 생성에만 사용됩니다.
+                입력한 키는 서버에 저장되지 않으며, 포스터 생성에만 사용됩니다.<br>
+키는 이 브라우저에만 기억됩니다. <a href="#" onclick="localStorage.removeItem('gemini_api_key'); document.getElementById('apiKey').value=''; alert('키가 삭제되었습니다.'); return false;">키 삭제하기</a>
             </div>
         </div>
 
@@ -649,6 +650,21 @@ async function goToStep3() {
 
 buildSizeGrid();
 buildStyleGrid();
+
+// API 키 자동 저장/불러오기
+const savedKey = localStorage.getItem('gemini_api_key');
+if (savedKey) {
+    document.getElementById('apiKey').value = savedKey;
+}
+document.getElementById('apiKey').addEventListener('change', function() {
+    const key = this.value.trim();
+    if (key) {
+        localStorage.setItem('gemini_api_key', key);
+    } else {
+        localStorage.removeItem('gemini_api_key');
+    }
+});
+    
 </script>
 </body>
 </html>
