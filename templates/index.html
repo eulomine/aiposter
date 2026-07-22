@@ -33,13 +33,24 @@
         .panel h2 { font-size: 1.2rem; margin-bottom: 20px; color: #a0a0ff; }
 
         label { display: block; margin-bottom: 6px; font-weight: 600; color: #c0c0e0; font-size: 0.9rem; }
-        input[type="text"], input[type="number"], input[type="password"], textarea, select {
+        input[type="text"], input[type="number"], input[type="password"], input[type="color"], textarea, select {
             width: 100%; padding: 12px 16px; border: 1px solid #3a3a6a;
             border-radius: 10px; background: #12122a; color: #e0e0e0;
             font-size: 1rem; margin-bottom: 16px; transition: border 0.2s;
         }
         input:focus, textarea:focus, select:focus { outline: none; border-color: #667eea; }
         textarea { resize: vertical; min-height: 80px; }
+
+        input[type="color"] {
+            width: 60px; height: 40px; padding: 2px; cursor: pointer;
+            border-radius: 8px; margin-bottom: 16px;
+        }
+        .color-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+        .color-row label { margin-bottom: 0; }
+        .color-preview {
+            width: 30px; height: 30px; border-radius: 6px; border: 2px solid #3a3a6a;
+            display: inline-block; vertical-align: middle;
+        }
 
         .api-key-panel { background: linear-gradient(135deg, #1a2a4a, #1a1a3e); border: 1px solid #4a5a8a; }
         .api-key-help {
@@ -79,6 +90,18 @@
         .ratio-info.visible { display: block; }
         .ratio-info .match { color: #8f8; }
         .ratio-info .warn { color: #fa0; }
+
+        .style-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 10px; margin-bottom: 16px;
+        }
+        .style-card {
+            padding: 12px 8px; border: 2px solid #3a3a6a; border-radius: 12px;
+            text-align: center; cursor: pointer; transition: all 0.2s; background: #12122a;
+            font-size: 0.85rem;
+        }
+        .style-card:hover { border-color: #764ba2; }
+        .style-card.selected { border-color: #764ba2; background: #352560; }
 
         .upload-list { margin-bottom: 16px; }
         .upload-item {
@@ -154,8 +177,14 @@
             line-height: 1.6; max-height: 300px; overflow-y: auto;
         }
 
+        .pptx-info {
+            background: #1a2a3a; padding: 16px; border-radius: 10px;
+            margin-top: 16px; border: 1px solid #2a4a6a; font-size: 0.85rem; line-height: 1.6; color: #a0c0e0;
+        }
+
         @media (max-width: 600px) {
             .size-grid { grid-template-columns: repeat(2, 1fr); }
+            .style-grid { grid-template-columns: repeat(2, 1fr); }
             .custom-size-row { flex-wrap: wrap; }
             .upload-item { flex-wrap: wrap; }
         }
@@ -210,23 +239,42 @@
         </div>
 
         <div class="panel">
+            <h2>🎭 디자인 스타일</h2>
+            <div class="style-grid" id="styleGrid"></div>
+            <div id="customMoodRow">
+                <label for="mood">분위기를 자유롭게 설명해주세요</label>
+                <textarea id="mood" placeholder="예: 80주년 역사 있는 교회, 실사 사진풍으로 격식있고 품격있게"></textarea>
+            </div>
+        </div>
+
+        <div class="panel">
             <h2>📝 포스터 내용</h2>
             <label for="title">제목 (필수)</label>
-            <input type="text" id="title" placeholder="예: 신나는 여름 축제!">
+            <input type="text" id="title" placeholder="예: 여름 아웃리치">
             <label for="date">날짜 / 시간</label>
-            <input type="text" id="date" placeholder="예: 2025년 8월 15일 오후 2시">
+            <input type="text" id="date" placeholder="예: 2026년 8월 7일(금) - 9일(일)">
             <label for="venue">장소</label>
-            <input type="text" id="venue" placeholder="예: 서울 잠실 올림픽공원">
-            <label for="content">반드시 들어갈 내용 (고정 멘트)</label>
-            <textarea id="content" placeholder="예: 참가비 무료 / 사전등록 필수 / 문의: 02-1234-5678"></textarea>
+            <input type="text" id="venue" placeholder="예: 전라남도 신안군 도초도, 비금도 일대">
+            <label for="organizer">주관</label>
+            <input type="text" id="organizer" placeholder="예: 이리신광교회">
+            <label for="content">반드시 들어갈 내용 (줄바꿈으로 구분하면 각각 별도 텍스트로 배치됩니다)</label>
+            <textarea id="content" placeholder="예:&#10;성도님들의 참여를 기다립니다!&#10;모집 부문: 미용봉사, 태양광 설치, 마을청소, 어린이 성경학교&#10;신청 기간: 7월 말까지&#10;문의: 사무실 및 담당 교역자"></textarea>
             <label for="additional">AI에게 맡길 추가 표현</label>
             <textarea id="additional" placeholder="예: 시원한 여름 느낌의 캐치프레이즈를 만들어줘"></textarea>
         </div>
 
         <div class="panel">
-            <h2>🎭 분위기 / 스타일</h2>
-            <label for="mood">원하는 분위기를 자유롭게 설명해주세요</label>
-            <textarea id="mood" placeholder="예: 5살 아이가 크레파스로 그린 것 같은 귀여운 느낌"></textarea>
+            <h2>🎨 텍스트 색상</h2>
+            <div class="color-row">
+                <label>PPTX 텍스트 색상:</label>
+                <input type="color" id="fontColor" value="#FFFFFF">
+                <span id="fontColorHex" style="font-size:0.85rem; color:#888;">#FFFFFF</span>
+            </div>
+            <p style="color:#666; font-size:0.8rem;">배경이 밝으면 어두운 색, 어두우면 밝은 색을 선택하세요. PPTX에서 나중에 변경 가능합니다.</p>
+        </div>
+
+        <div class="panel">
+            <h2>📎 참고 이미지 & 폰트</h2>
             <label for="refImage">참고 이미지 (선택)</label>
             <input type="file" id="refImage" accept="image/*" style="margin-bottom:16px;">
             <label for="fontFile">폰트 파일 (선택, .ttf/.otf)</label>
@@ -266,7 +314,7 @@
         <div class="panel feedback-area" id="feedbackArea">
             <h2>💬 수정 요청</h2>
             <label for="feedback">마음에 들지 않는 부분이 있으면 알려주세요</label>
-            <textarea id="feedback" placeholder="예: 배경색을 더 밝게 / 타이틀을 위로 올려줘"></textarea>
+            <textarea id="feedback" placeholder="예: 배경색을 더 밝게 / 실사 느낌이 더 강하게 / 레이아웃을 바꿔줘"></textarea>
             <div class="btn-row">
                 <button class="btn btn-secondary" onclick="goToStep1()">◀ 처음으로</button>
                 <button class="btn btn-secondary" onclick="submitRevise()">🔄 수정하기</button>
@@ -292,10 +340,12 @@
                 <div class="expire-notice">
                     ⏰ 다운로드 링크는 <strong>10분간</strong> 유효합니다. 지금 바로 다운로드하세요!
                 </div>
-                <p style="text-align:center; margin-top:20px; color:#888; font-size:0.85rem;">
-                    PPTX를 열어서 텍스트, 위치, 크기를 자유롭게 수정하세요.<br>
-                    슬라이드 2는 참고용 이미지입니다. 편집 후 삭제하세요.
-                </p>
+                <div class="pptx-info">
+                    📋 <strong>PPTX 슬라이드 구성:</strong><br>
+                    • 슬라이드 1 — 편집용: 배경 이미지 + 텍스트 박스 (자유롭게 수정 가능)<br>
+                    • 슬라이드 2 — 원본 활용용: AI 원본 이미지 그대로 (오타만 텍스트 박스로 덮어 수정)<br>
+                    • 슬라이드 3 — 참고용: 편집 완료 후 삭제하세요
+                </div>
                 <div class="btn-row" style="margin-top:30px;">
                     <button class="btn btn-secondary" onclick="location.reload()">🔄 새 포스터 만들기</button>
                 </div>
@@ -316,12 +366,26 @@ const PRESETS = {
     "hanging_banner": { name: "가로 현수막",   w: 500.0,  h: 90.0 },
     "custom":         { name: "✏️ 커스텀",    w: 0,      h: 0 },
 };
+
+const STYLE_PRESETS = {
+    "cute_illust": "귀여운 일러스트",
+    "corporate":   "깔끔한 기업형",
+    "photo_real":  "실사 사진풍",
+    "watercolor":  "수채화풍",
+    "minimal":     "미니멀 / 타이포",
+    "retro":       "레트로 / 빈티지",
+    "pop_art":     "팝아트 / 컬러풀",
+    "elegant":     "고급스러운 / 포멀",
+    "custom":      "✏️ 직접 입력",
+};
+
 const GEMINI_RATIOS = [
     [1,1],[3,2],[2,3],[3,4],[4,3],[4,5],[5,4],
     [9,16],[16,9],[21,9],[9,21],[1,4],[4,1],[1,8],[8,1]
 ];
 
 let selectedPreset = null;
+let selectedStyle = null;
 let currentSid = null;
 let uploadedImages = [];
 
@@ -360,6 +424,17 @@ function buildSizeGrid() {
     }
 }
 
+function buildStyleGrid() {
+    const grid = document.getElementById('styleGrid');
+    for (const [key, name] of Object.entries(STYLE_PRESETS)) {
+        const card = document.createElement('div');
+        card.className = 'style-card'; card.dataset.key = key;
+        card.textContent = name;
+        card.addEventListener('click', () => selectStyle(key));
+        grid.appendChild(card);
+    }
+}
+
 function selectSize(key) {
     selectedPreset = key;
     document.querySelectorAll('.size-card').forEach(c => c.classList.toggle('selected', c.dataset.key === key));
@@ -378,6 +453,19 @@ function selectSize(key) {
         ratioInfo.innerHTML = diff < 1
             ? `<span class="match">✅ 완벽 매칭!</span> ${p.w}×${p.h}cm → Gemini 비율: <strong>${ratio}</strong>`
             : `<span class="warn">⚠️ 근사 매칭</span> ${p.w}×${p.h}cm → Gemini: <strong>${ratio}</strong> — 차이 ${diff.toFixed(1)}%`;
+    }
+}
+
+function selectStyle(key) {
+    selectedStyle = key;
+    document.querySelectorAll('.style-card').forEach(c => c.classList.toggle('selected', c.dataset.key === key));
+    const moodRow = document.getElementById('customMoodRow');
+    if (key === 'custom') {
+        moodRow.style.display = 'block';
+        document.getElementById('mood').placeholder = '원하는 스타일을 자유롭게 설명해주세요';
+    } else {
+        moodRow.style.display = 'block';
+        document.getElementById('mood').placeholder = '추가 분위기 설명 (선택사항, 비워도 됩니다)';
     }
 }
 
@@ -404,6 +492,10 @@ function updateCustomRatio() {
 document.getElementById('customWidth').addEventListener('input', updateCustomRatio);
 document.getElementById('customHeight').addEventListener('input', updateCustomRatio);
 document.getElementById('customUnit').addEventListener('change', updateCustomRatio);
+
+document.getElementById('fontColor').addEventListener('input', function() {
+    document.getElementById('fontColorHex').textContent = this.value.toUpperCase();
+});
 
 document.getElementById('hiddenFileInput').addEventListener('change', function(e) {
     const file = e.target.files[0]; if (!file) return;
@@ -458,6 +550,8 @@ async function submitPlan() {
 
     const formData = new FormData();
     formData.append('api_key', apiKey);
+    formData.append('style_preset', selectedStyle || 'custom');
+
     if (selectedPreset === 'custom') {
         const unit = document.getElementById('customUnit').value;
         let w = parseFloat(document.getElementById('customWidth').value);
@@ -472,9 +566,11 @@ async function submitPlan() {
     formData.append('title', document.getElementById('title').value);
     formData.append('date', document.getElementById('date').value);
     formData.append('venue', document.getElementById('venue').value);
+    formData.append('organizer', document.getElementById('organizer').value);
     formData.append('content', document.getElementById('content').value);
     formData.append('additional', document.getElementById('additional').value);
     formData.append('mood', document.getElementById('mood').value);
+    formData.append('font_color', document.getElementById('fontColor').value.replace('#', ''));
     const refFile = document.getElementById('refImage').files[0];
     if (refFile) formData.append('reference_image', refFile);
     const fontFile = document.getElementById('fontFile').files[0];
@@ -541,9 +637,9 @@ async function goToStep3() {
             const sid = data.sid;
             const links = document.getElementById('downloadLinks');
             links.innerHTML = `
-                <a href="/download/${sid}/pptx" download="poster.pptx">📥 PPTX 다운로드</a>
-                <a href="/download/${sid}/reference" download="reference.jpg">🖼️ 참고 이미지</a>
-                <a href="/download/${sid}/background" download="background.jpg">🎨 배경 이미지</a>
+                <a href="/download/${sid}/pptx">📥 PPTX 다운로드</a>
+                <a href="/download/${sid}/original">🖼️ 원본 이미지 (텍스트 포함)</a>
+                <a href="/download/${sid}/background">🎨 배경 이미지 (텍스트 제거)</a>
             `;
             document.getElementById('resultPanel').classList.add('visible');
         } else { alert('오류: ' + data.error); setStep(2); }
@@ -552,6 +648,7 @@ async function goToStep3() {
 }
 
 buildSizeGrid();
+buildStyleGrid();
 </script>
 </body>
 </html>
