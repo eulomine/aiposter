@@ -94,7 +94,6 @@ def generate_image(client, prompt, aspect_ratio, image_size="2K",
         contents=contents,
         config=types.GenerateContentConfig(
             response_modalities=["IMAGE", "TEXT"],
-            response_mime_type="image/jpeg",
         ),
     )
 
