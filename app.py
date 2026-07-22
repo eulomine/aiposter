@@ -332,45 +332,89 @@ Keep all illustrations, decorations, colors, and artistic elements exactly the s
         # 3) 텍스트 세분화 배치
         w = size["width_cm"]
         h = size["height_cm"]
-        margin = min(w, h) * 0.05
+        
+        # PPTX 최대 크기 제한 적용
+        MAX_CM = 142.0
+        pptx_scale = 1.0
+        if w > MAX_CM or h > MAX_CM:
+            pptx_scale = min(MAX_CM / w, MAX_CM / h)
+        
+        # 텍스트 배치는 스케일 적용된 크기 기준
+        pw = w * pptx_scale
+        ph = h * pptx_scale
+        margin = min(pw, ph) * 0.05
         font_name = store.get("font_name", "맑은 고딕")
         font_color = info.get("font_color", "FFFFFF")
 
         texts = []
 
-        # 제목
         if info.get("title"):
             texts.append({
                 "content": info["title"],
-                "x_cm": margin, "y_cm": h * 0.05,
-                "width_cm": w - margin * 2, "height_cm": h * 0.12,
-                "font_size_pt": max(24, min(72, int(min(w, h) * 1.2))),
+                "x_cm": margin, "y_cm": ph * 0.05,
+                "width_cm": pw - margin * 2, "height_cm": ph * 0.12,
+                "font_size_pt": max(24, min(72, int(min(pw, ph) * 1.2))),
                 "font_name": font_name,
                 "font_color": font_color, "bold": True, "align": "center",
             })
 
-        # 날짜
         if info.get("date"):
             texts.append({
                 "content": info["date"],
-                "x_cm": margin, "y_cm": h * 0.18,
-                "width_cm": w - margin * 2, "height_cm": h * 0.05,
-                "font_size_pt": max(14, min(36, int(min(w, h) * 0.6))),
+                "x_cm": margin, "y_cm": ph * 0.18,
+                "width_cm": pw - margin * 2, "height_cm": ph * 0.05,
+                "font_size_pt": max(14, min(36, int(min(pw, ph) * 0.6))),
                 "font_name": font_name,
                 "font_color": font_color, "bold": True, "align": "center",
             })
 
-        # 장소
         if info.get("venue"):
             texts.append({
                 "content": info["venue"],
-                "x_cm": margin, "y_cm": h * 0.23,
-                "width_cm": w - margin * 2, "height_cm": h * 0.05,
-                "font_size_pt": max(12, min(30, int(min(w, h) * 0.5))),
+                "x_cm": margin, "y_cm": ph * 0.23,
+                "width_cm": pw - margin * 2, "height_cm": ph * 0.05,
+                "font_size_pt": max(12, min(30, int(min(pw, ph) * 0.5))),
                 "font_name": font_name,
                 "font_color": font_color, "bold": False, "align": "center",
             })
 
+        if info.get("content"):
+            content_lines = [line.strip() for line in info["content"].split('\n') if line.strip()]
+            start_y = ph * 0.55
+            line_height = ph * 0.05
+            for i, line in enumerate(content_lines):
+                texts.append({
+                    "content": line,
+                    "x_cm": margin, "y_cm": start_y + (i * line_height),
+                    "width_cm": pw - margin * 2, "height_cm": line_height,
+                    "font_size_pt": max(10, min(24, int(min(pw, ph) * 0.4))),
+                    "font_name": font_name,
+                    "font_color": font_color, "bold": False, "align": "center",
+                })
+
+        if info.get("organizer"):
+            texts.append({
+                "content": f"주관: {info['organizer']}",
+                "x_cm": margin, "y_cm": ph * 0.92,
+                "width_cm": pw - margin * 2, "height_cm": ph * 0.05,
+                "font_size_pt": max(12, min(28, int(min(pw, ph) * 0.5))),
+                "font_name": font_name,
+                "font_color": font_color, "bold": True, "align": "center",
+            })
+
+        upload_for_pptx = []
+        if store.get("upload_images"):
+            for i, img in enumerate(store["upload_images"]):
+                img_w = min(pw * 0.15, 8)
+                img_h = img_w
+                upload_for_pptx.append({
+                    "image_bytes": img["image_bytes"],
+                    "description": img["description"],
+                    "x_cm": pw - margin - img_w - (i * (img_w + 1)),
+                    "y_cm": ph - margin - img_h,
+                    "width_cm": img_w,
+                    "height_cm": img_h,
+                })
         # 고정 멘트 — 줄바꿈 기준으로 분리
         if info.get("content"):
             content_lines = [line.strip() for line in info["content"].split('\n') if line.strip()]
