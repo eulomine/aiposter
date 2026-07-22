@@ -47,10 +47,6 @@
         }
         .color-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
         .color-row label { margin-bottom: 0; }
-        .color-preview {
-            width: 30px; height: 30px; border-radius: 6px; border: 2px solid #3a3a6a;
-            display: inline-block; vertical-align: middle;
-        }
 
         .api-key-panel { background: linear-gradient(135deg, #1a2a4a, #1a1a3e); border: 1px solid #4a5a8a; }
         .api-key-help {
@@ -167,6 +163,12 @@
             color: #fa0; font-size: 0.85rem;
         }
 
+        .print-info {
+            background: #1a2a1a; padding: 14px 16px; border-radius: 10px;
+            margin-top: 12px; border: 1px solid #2a5a2a; font-size: 0.85rem;
+            line-height: 1.6; color: #a0e0a0;
+        }
+
         .feedback-area { display: none; }
         .feedback-area.visible { display: block; }
         .hidden { display: none !important; }
@@ -215,7 +217,7 @@
                 <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a>에서
                 무료로 발급받을 수 있습니다. (로그인 → Create API Key)<br>
                 입력한 키는 서버에 저장되지 않으며, 포스터 생성에만 사용됩니다.<br>
-키는 이 브라우저에만 기억됩니다. <a href="#" onclick="localStorage.removeItem('gemini_api_key'); document.getElementById('apiKey').value=''; alert('키가 삭제되었습니다.'); return false;">키 삭제하기</a>
+                키는 이 브라우저에만 기억됩니다. <a href="#" onclick="localStorage.removeItem('gemini_api_key'); document.getElementById('apiKey').value=''; alert('키가 삭제되었습니다.'); return false;">키 삭제하기</a>
             </div>
         </div>
 
@@ -250,6 +252,9 @@
 
         <div class="panel">
             <h2>📝 포스터 내용</h2>
+            <p style="color:#fa0; font-size:0.8rem; margin-bottom:16px; padding:10px; background:#2a1a0a; border-radius:8px; border:1px solid #5a3a1a;">
+                ⚠️ 입력하지 않은 항목은 포스터에 표시되지 않습니다. AI가 임의로 전화번호, 이메일 등을 만들어내지 않습니다.
+            </p>
             <label for="title">제목 (필수)</label>
             <input type="text" id="title" placeholder="예: 여름 아웃리치">
             <label for="date">날짜 / 시간</label>
@@ -284,8 +289,12 @@
 
         <div class="panel">
             <h2>🖼️ 필수 이미지 업로드</h2>
-            <p style="color:#888; font-size:0.85rem; margin-bottom:16px;">
-                로고, 강사 사진, QR코드 등 반드시 포스터에 들어가야 하는 이미지를 추가하세요.
+            <p style="color:#888; font-size:0.85rem; margin-bottom:12px;">
+                로고, 강사 사진, QR코드 등 반드시 포스터에 들어가야 하는 이미지를 추가하세요.<br>
+                각 이미지마다 설명을 적으면 AI가 배치 위치를 결정합니다.
+            </p>
+            <p style="color:#667eea; font-size:0.8rem; margin-bottom:16px;">
+                💡 이미지를 업로드하지 않으면 로고/사진 자리를 만들지 않고 전체를 디자인으로 채웁니다.
             </p>
             <div class="upload-list" id="uploadList"></div>
             <label class="btn-add-image">
@@ -338,6 +347,7 @@
                     <img id="finalImg" src="" alt="완성된 포스터">
                 </div>
                 <div class="download-links" id="downloadLinks"></div>
+                <div id="printInfoArea"></div>
                 <div class="expire-notice">
                     ⏰ 다운로드 링크는 <strong>10분간</strong> 유효합니다. 지금 바로 다운로드하세요!
                 </div>
@@ -451,9 +461,14 @@ function selectSize(key) {
         const gemR = (rw / rh).toFixed(3);
         const diff = Math.abs(actual - gemR) / actual * 100;
         ratioInfo.classList.add('visible');
-        ratioInfo.innerHTML = diff < 1
-            ? `<span class="match">✅ 완벽 매칭!</span> ${p.w}×${p.h}cm → Gemini 비율: <strong>${ratio}</strong>`
-            : `<span class="warn">⚠️ 근사 매칭</span> ${p.w}×${p.h}cm → Gemini: <strong>${ratio}</strong> — 차이 ${diff.toFixed(1)}%`;
+        if (diff < 1) {
+            ratioInfo.innerHTML = `<span class="match">✅ 완벽 매칭!</span> ${p.w}×${p.h}cm → Gemini 비율: <strong>${ratio}</strong>`;
+        } else {
+            ratioInfo.innerHTML = `<span class="warn">⚠️ 근사 매칭</span> ${p.w}×${p.h}cm → Gemini: <strong>${ratio}</strong> — 차이 ${diff.toFixed(1)}%`;
+        }
+        if (p.w > 142 || p.h > 142) {
+            ratioInfo.innerHTML += `<br><span style="color:#fa0; font-size:0.8rem;">📐 PPTX 최대 제한(142cm)을 초과합니다. 비율 유지하며 축소된 PPTX가 생성됩니다.</span>`;
+        }
     }
 }
 
@@ -485,10 +500,16 @@ function updateCustomRatio() {
     const gemR = (rw / rh).toFixed(3);
     const diff = Math.abs(actual - gemR) / actual * 100;
     ratioInfo.classList.add('visible');
-    ratioInfo.innerHTML = `입력: ${w}${unit} × ${h}${unit} (= ${wCm}×${hCm}cm)<br>` +
-        (diff < 1
-            ? `<span class="match">✅ 완벽 매칭!</span> Gemini 비율: <strong>${ratio}</strong>`
-            : `<span class="warn">⚠️ 근사 매칭</span> 실제 ${actual} → Gemini: <strong>${ratio}</strong> (${gemR}) — 차이 ${diff.toFixed(1)}%<br><span style="font-size:0.8rem;color:#aaa;">AI 이미지는 이 비율로 생성, PPTX는 정확한 입력 크기로 설정됩니다.</span>`);
+    let html = `입력: ${w}${unit} × ${h}${unit} (= ${wCm}×${hCm}cm)<br>`;
+    if (diff < 1) {
+        html += `<span class="match">✅ 완벽 매칭!</span> Gemini 비율: <strong>${ratio}</strong>`;
+    } else {
+        html += `<span class="warn">⚠️ 근사 매칭</span> 실제 ${actual} → Gemini: <strong>${ratio}</strong> (${gemR}) — 차이 ${diff.toFixed(1)}%<br><span style="font-size:0.8rem;color:#aaa;">AI 이미지는 이 비율로 생성, PPTX는 정확한 입력 크기로 설정됩니다.</span>`;
+    }
+    if (wCm > 142 || hCm > 142) {
+        html += `<br><span style="color:#fa0; font-size:0.8rem;">📐 PPTX 최대 제한(142cm)을 초과합니다. 비율 유지하며 축소된 PPTX가 생성됩니다.</span>`;
+    }
+    ratioInfo.innerHTML = html;
 }
 document.getElementById('customWidth').addEventListener('input', updateCustomRatio);
 document.getElementById('customHeight').addEventListener('input', updateCustomRatio);
@@ -512,7 +533,7 @@ function renderUploadList() {
         div.innerHTML = `<img src="${item.previewUrl}" alt="미리보기">
             <div class="upload-info">
                 <div style="font-size:0.8rem;color:#888;margin-bottom:4px;">${item.file.name}</div>
-                <input type="text" placeholder="설명 (예: 회사 로고 — 우측 상단에 배치)"
+                <input type="text" placeholder="설명 (예: 교회 로고 — 우측 상단에 배치)"
                     value="${item.description}" onchange="uploadedImages[${idx}].description=this.value">
             </div>
             <button class="btn-remove" onclick="removeUpload(${idx})">삭제</button>`;
@@ -589,15 +610,15 @@ async function submitPlan() {
 
     try {
         const resp = await fetch('/api/plan', { method: 'POST', body: formData });
-        const data = await resp.json();
-        if (data.success) {
-            currentSid = data.sid;
-            document.getElementById('sketchImg').src = 'data:image/jpeg;base64,' + data.sketch_b64;
-            document.getElementById('planText').textContent = data.plan_text;
+        const result = await resp.json();
+        if (result.success) {
+            currentSid = result.sid;
+            document.getElementById('sketchImg').src = 'data:image/jpeg;base64,' + result.sketch_b64;
+            document.getElementById('planText').textContent = result.plan_text;
             document.getElementById('previewArea').style.display = 'block';
             document.getElementById('planText').style.display = 'block';
             document.getElementById('feedbackArea').classList.add('visible');
-        } else { alert('오류: ' + data.error); setStep(1); }
+        } else { alert('오류: ' + result.error); setStep(1); }
     } catch (err) { alert('네트워크 오류: ' + err.message); setStep(1); }
     document.getElementById('loading2').classList.remove('visible');
 }
@@ -611,13 +632,13 @@ async function submitRevise() {
     document.getElementById('previewArea').style.display = 'none';
     try {
         const resp = await fetch('/api/revise', { method: 'POST', body: formData });
-        const data = await resp.json();
-        if (data.success) {
-            currentSid = data.sid;
-            document.getElementById('sketchImg').src = 'data:image/jpeg;base64,' + data.sketch_b64;
+        const result = await resp.json();
+        if (result.success) {
+            currentSid = result.sid;
+            document.getElementById('sketchImg').src = 'data:image/jpeg;base64,' + result.sketch_b64;
             document.getElementById('previewArea').style.display = 'block';
             document.getElementById('feedback').value = '';
-        } else { alert('오류: ' + data.error); }
+        } else { alert('오류: ' + result.error); }
     } catch (err) { alert('네트워크 오류: ' + err.message); }
     document.getElementById('loading2').classList.remove('visible');
 }
@@ -632,18 +653,33 @@ async function goToStep3() {
 
     try {
         const resp = await fetch('/api/generate', { method: 'POST', body: formData });
-        const data = await resp.json();
-        if (data.success) {
-            document.getElementById('finalImg').src = 'data:image/jpeg;base64,' + data.reference_b64;
-            const sid = data.sid;
+        const result = await resp.json();
+        if (result.success) {
+            document.getElementById('finalImg').src = 'data:image/jpeg;base64,' + result.reference_b64;
+            const sid = result.sid;
             const links = document.getElementById('downloadLinks');
             links.innerHTML = `
                 <a href="/download/${sid}/pptx">📥 PPTX 다운로드</a>
                 <a href="/download/${sid}/original">🖼️ 원본 이미지 (텍스트 포함)</a>
                 <a href="/download/${sid}/background">🎨 배경 이미지 (텍스트 제거)</a>
             `;
+
+            // 인쇄 크기 안내
+            const printArea = document.getElementById('printInfoArea');
+            if (result.print_info) {
+                const pi = result.print_info;
+                printArea.innerHTML = `<div class="print-info">
+                    📐 <strong>인쇄 크기 안내</strong><br>
+                    실제 인쇄 크기: <strong>${pi.actual_width_cm} × ${pi.actual_height_cm} cm</strong><br>
+                    PPTX 슬라이드 크기: ${pi.pptx_width_cm} × ${pi.pptx_height_cm} cm (${pi.scale_percent}% 축소, 비율 동일)<br>
+                    <span style="color:#fa0;">인쇄소에 원본 크기(${pi.actual_width_cm}×${pi.actual_height_cm}cm)를 전달하세요.</span>
+                </div>`;
+            } else {
+                printArea.innerHTML = '';
+            }
+
             document.getElementById('resultPanel').classList.add('visible');
-        } else { alert('오류: ' + data.error); setStep(2); }
+        } else { alert('오류: ' + result.error); setStep(2); }
     } catch (err) { alert('네트워크 오류: ' + err.message); setStep(2); }
     document.getElementById('loading3').classList.remove('visible');
 }
@@ -664,7 +700,6 @@ document.getElementById('apiKey').addEventListener('change', function() {
         localStorage.removeItem('gemini_api_key');
     }
 });
-    
 </script>
 </body>
 </html>
