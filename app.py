@@ -1,7 +1,8 @@
 """
 app.py
 AI 포스터 생성기 — Flask 웹 서버
-v2: 텍스트 세분화, 스타일 프리셋, 3슬라이드, 재시도, 원본 다운로드
+v3: 절대 규칙(미입력 정보 금지, 업로드 없으면 공간 미확보),
+    blank_layout 수정, 텍스트 중복 제거, PPTX 크기 제한, 인쇄 크기 안내
 """
 
 import os
@@ -27,14 +28,17 @@ app.secret_key = os.environ.get("SECRET_KEY", "ai-poster-secret-key-change-me")
 
 memory_store = {}
 
+
 def get_store(sid):
     if sid not in memory_store:
         memory_store[sid] = {"created": time.time()}
     return memory_store[sid]
 
+
 def clear_store(sid):
     if sid in memory_store:
         del memory_store[sid]
+
 
 def cleanup_old_sessions():
     while True:
@@ -44,6 +48,7 @@ def cleanup_old_sessions():
                    if now - data.get("created", now) > 600]
         for sid in expired:
             del memory_store[sid]
+
 
 cleanup_thread = threading.Thread(target=cleanup_old_sessions, daemon=True)
 cleanup_thread.start()
@@ -146,21 +151,47 @@ def api_plan():
 
         plan_text = generate_text_plan(client, poster_info)
 
-        # 스타일 프롬프트 조합
+        # ── 스케치 프롬프트 (절대 규칙 포함) ──
         style_instruction = style_prompt_en
         if mood_text:
             style_instruction += f"\nAdditional mood/style: {mood_text}"
 
-        orientation = "wide/horizontal layout" if size['width_cm'] > size['height_cm'] else "tall/vertical layout" if size['height_cm'] > size['width_cm'] else "square layout"
+        orientation = (
+            "wide/horizontal layout" if size['width_cm'] > size['height_cm']
+            else "tall/vertical layout" if size['height_cm'] > size['width_cm']
+            else "square layout"
+        )
+
+        # 업로드 이미지 유무에 따른 프롬프트 분기
+        has_uploads = len(upload_images) > 0
+        if has_uploads:
+            upload_prompt_section = f"Uploaded materials: {', '.join(upload_descriptions)}\nLeave appropriate spaces where these uploaded images would be placed."
+        else:
+            upload_prompt_section = "No uploaded images. Do NOT leave empty spaces for logos, photos, or QR codes. Fill the entire poster with graphics and design elements."
+
+        # 입력된 항목만 프롬프트에 포함
+        info_lines = []
+        if data.get('title'):
+            info_lines.append(f"Title: {data['title']}")
+        if data.get('date'):
+            info_lines.append(f"Date: {data['date']}")
+        if data.get('venue'):
+            info_lines.append(f"Venue: {data['venue']}")
+        if data.get('organizer'):
+            info_lines.append(f"Organizer: {data['organizer']}")
+        if data.get('content'):
+            info_lines.append(f"Content to include: {data['content']}")
+        if data.get('additional'):
+            info_lines.append(f"Additional creative requests: {data['additional']}")
+        info_block = "\n".join(info_lines)
 
         sketch_prompt = f"""Create a poster design draft.
-Theme/Title: {data.get('title', '')}
-Date: {data.get('date', '')}
-Venue: {data.get('venue', '')}
-Organizer: {data.get('organizer', '')}
-Content to include: {data.get('content', '')}
-Additional creative requests: {data.get('additional', '')}
-Uploaded materials: {', '.join(upload_descriptions) if upload_descriptions else 'none'}
+{info_block}
+{upload_prompt_section}
+
+ABSOLUTE RULE: Do NOT invent or add any information that is not provided above.
+Do NOT create fake phone numbers, email addresses, websites, registration methods, or contact details.
+Only include information that is explicitly given.
 
 DESIGN STYLE: {style_instruction}
 
@@ -169,9 +200,8 @@ Design accordingly — {orientation}.
 
 Include all text in Korean.
 Show approximate layout with colors, text positions, and decorative elements.
-Leave clear spaces where uploaded images (logos, photos) would be placed.
 Make it look like a professional poster.
-For the bottom information area (contact, registration, organizer), keep the background clean so text can be overlaid later."""
+For the bottom information area, keep the background clean so text can be overlaid later."""
 
         sketch_bytes = generate_image(
             client,
@@ -216,6 +246,8 @@ For the bottom information area (contact, registration, organizer), keep the bac
             error_msg = "API 사용량 한도에 도달했습니다. 잠시 후 다시 시도해주세요."
         elif "safety" in error_msg.lower():
             error_msg = "AI 안전 필터에 의해 차단되었습니다. 내용을 수정해주세요."
+        elif "503" in error_msg or "overloaded" in error_msg.lower():
+            error_msg = "Gemini 서버가 일시적으로 과부하 상태입니다. 1~2분 후 다시 시도해주세요."
         return jsonify({"success": False, "error": error_msg}), 500
 
 
@@ -238,7 +270,11 @@ def api_revise():
         if info.get("mood"):
             style_instruction += f"\nMood: {info['mood']}"
 
-        orientation = "Wide/horizontal layout" if size['width_cm'] > size['height_cm'] else "Tall/vertical layout" if size['height_cm'] > size['width_cm'] else "Square layout"
+        orientation = (
+            "Wide/horizontal layout" if size['width_cm'] > size['height_cm']
+            else "Tall/vertical layout" if size['height_cm'] > size['width_cm']
+            else "Square layout"
+        )
 
         revise_prompt = f"""I have this poster design draft. Please revise it based on this feedback:
 
@@ -248,6 +284,9 @@ Keep the overall theme for: {info['title']}
 DESIGN STYLE: {style_instruction}
 Aspect ratio: {size['gemini_ratio']}
 {orientation}
+
+ABSOLUTE RULE: Do NOT invent or add any information that was not in the original design.
+Do NOT create fake phone numbers, emails, websites, or contact details.
 
 Apply the requested changes while maintaining the poster's quality.
 All text in Korean.
@@ -273,7 +312,10 @@ Keep the bottom area clean for text overlay."""
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({"success": False, "error": str(e)}), 500
+        error_msg = str(e)
+        if "503" in error_msg or "overloaded" in error_msg.lower():
+            error_msg = "Gemini 서버가 일시적으로 과부하 상태입니다. 1~2분 후 다시 시도해주세요."
+        return jsonify({"success": False, "error": error_msg}), 500
 
 
 @app.route("/api/generate", methods=["POST"])
@@ -296,16 +338,30 @@ def api_generate():
         if info.get("mood"):
             style_instruction += f"\nMood: {info['mood']}"
 
-        # 1) 완성본 (원본 — 텍스트 포함)
+        # ── 1) 완성본 (원본 — 텍스트 포함) ──
+        # 입력된 항목만 프롬프트에 포함
+        final_info_lines = []
+        if info.get('title'):
+            final_info_lines.append(f"Title: {info['title']}")
+        if info.get('date'):
+            final_info_lines.append(f"Date: {info['date']}")
+        if info.get('venue'):
+            final_info_lines.append(f"Venue: {info['venue']}")
+        if info.get('organizer'):
+            final_info_lines.append(f"Organizer: {info['organizer']}")
+        if info.get('content'):
+            final_info_lines.append(f"Content: {info['content']}")
+        final_info_block = "\n".join(final_info_lines)
+
         final_prompt = f"""Based on this draft, create the FINAL high-quality poster.
 Keep the exact same layout, colors, style, and composition.
 Make everything polished, crisp, and professional.
 All Korean text must be accurate and readable.
+
+ABSOLUTE RULE: Only include the following information. Do NOT add phone numbers, emails, websites, or any details not listed below.
+{final_info_block}
+
 DESIGN STYLE: {style_instruction}
-Title: {info['title']}
-Date: {info.get('date', '')}
-Venue: {info.get('venue', '')}
-Organizer: {info.get('organizer', '')}
 Aspect ratio must be exactly {size['gemini_ratio']}."""
 
         original_bytes = generate_image(
@@ -315,7 +371,7 @@ Aspect ratio must be exactly {size['gemini_ratio']}."""
             ref_image_bytes=sketch,
         )
 
-        # 2) 배경 (일러스트 라벨 유지, 안내 텍스트만 제거)
+        # ── 2) 배경 (일러스트 라벨 유지, 안내 텍스트만 제거) ──
         bg_prompt = """Remove the informational text from this poster image.
 Keep ALL illustration labels and decorative text that are part of the artwork (like category names on illustrations).
 Remove ONLY the main title text, date, venue, contact information, registration details, and organizer text.
@@ -329,16 +385,16 @@ Keep all illustrations, decorations, colors, and artistic elements exactly the s
             ref_image_bytes=original_bytes,
         )
 
-        # 3) 텍스트 세분화 배치
+        # ── 3) 텍스트 세분화 배치 ──
         w = size["width_cm"]
         h = size["height_cm"]
-        
+
         # PPTX 최대 크기 제한 적용
         MAX_CM = 142.0
         pptx_scale = 1.0
         if w > MAX_CM or h > MAX_CM:
             pptx_scale = min(MAX_CM / w, MAX_CM / h)
-        
+
         # 텍스트 배치는 스케일 적용된 크기 기준
         pw = w * pptx_scale
         ph = h * pptx_scale
@@ -348,6 +404,7 @@ Keep all illustrations, decorations, colors, and artistic elements exactly the s
 
         texts = []
 
+        # 입력된 항목만 텍스트 박스 생성
         if info.get("title"):
             texts.append({
                 "content": info["title"],
@@ -378,6 +435,7 @@ Keep all illustrations, decorations, colors, and artistic elements exactly the s
                 "font_color": font_color, "bold": False, "align": "center",
             })
 
+        # 고정 멘트 — 줄바꿈 기준으로 각각 별도 텍스트 박스
         if info.get("content"):
             content_lines = [line.strip() for line in info["content"].split('\n') if line.strip()]
             start_y = ph * 0.55
@@ -392,6 +450,7 @@ Keep all illustrations, decorations, colors, and artistic elements exactly the s
                     "font_color": font_color, "bold": False, "align": "center",
                 })
 
+        # 주관
         if info.get("organizer"):
             texts.append({
                 "content": f"주관: {info['organizer']}",
@@ -402,6 +461,7 @@ Keep all illustrations, decorations, colors, and artistic elements exactly the s
                 "font_color": font_color, "bold": True, "align": "center",
             })
 
+        # ── 4) 업로드 이미지 배치 (있을 때만) ──
         upload_for_pptx = []
         if store.get("upload_images"):
             for i, img in enumerate(store["upload_images"]):
@@ -415,49 +475,14 @@ Keep all illustrations, decorations, colors, and artistic elements exactly the s
                     "width_cm": img_w,
                     "height_cm": img_h,
                 })
-        # 고정 멘트 — 줄바꿈 기준으로 분리
-        if info.get("content"):
-            content_lines = [line.strip() for line in info["content"].split('\n') if line.strip()]
-            start_y = h * 0.55
-            line_height = h * 0.05
-            for i, line in enumerate(content_lines):
-                texts.append({
-                    "content": line,
-                    "x_cm": margin, "y_cm": start_y + (i * line_height),
-                    "width_cm": w - margin * 2, "height_cm": line_height,
-                    "font_size_pt": max(10, min(24, int(min(w, h) * 0.4))),
-                    "font_name": font_name,
-                    "font_color": font_color, "bold": False, "align": "center",
-                })
 
-        # 주관
-        if info.get("organizer"):
-            texts.append({
-                "content": f"주관: {info['organizer']}",
-                "x_cm": margin, "y_cm": h * 0.92,
-                "width_cm": w - margin * 2, "height_cm": h * 0.05,
-                "font_size_pt": max(12, min(28, int(min(w, h) * 0.5))),
-                "font_name": font_name,
-                "font_color": font_color, "bold": True, "align": "center",
-            })
-
-        # 4) 업로드 이미지 배치
-        upload_for_pptx = []
-        if store.get("upload_images"):
-            for i, img in enumerate(store["upload_images"]):
-                img_w = min(w * 0.15, 8)
-                img_h = img_w
-                upload_for_pptx.append({
-                    "image_bytes": img["image_bytes"],
-                    "description": img["description"],
-                    "x_cm": w - margin - img_w - (i * (img_w + 1)),
-                    "y_cm": h - margin - img_h,
-                    "width_cm": img_w,
-                    "height_cm": img_h,
-                })
-
-        # 5) PPTX 생성 (3슬라이드)
+        # ── 5) PPTX 생성 (3슬라이드) ──
         poster_title = safe_filename(info.get("title", "poster"))
+
+        # 실제 인쇄 크기 (축소된 경우 표시용)
+        actual_w = size["width_cm"] if pptx_scale < 1.0 else None
+        actual_h = size["height_cm"] if pptx_scale < 1.0 else None
+
         pptx_buffer = create_poster_pptx(
             width_cm=w, height_cm=h,
             background_bytes=background_bytes,
@@ -466,6 +491,8 @@ Keep all illustrations, decorations, colors, and artistic elements exactly the s
             texts=texts,
             upload_images=upload_for_pptx,
             title=poster_title,
+            actual_width_cm=actual_w,
+            actual_height_cm=actual_h,
         )
 
         # 다운로드용 파일을 메모리에 저장
@@ -479,10 +506,22 @@ Keep all illustrations, decorations, colors, and artistic elements exactly the s
 
         ref_b64 = base64.b64encode(original_bytes).decode("utf-8")
 
+        # 인쇄 크기 안내 정보
+        print_info = None
+        if pptx_scale < 1.0:
+            print_info = {
+                "actual_width_cm": size["width_cm"],
+                "actual_height_cm": size["height_cm"],
+                "pptx_width_cm": round(w * pptx_scale, 2),
+                "pptx_height_cm": round(h * pptx_scale, 2),
+                "scale_percent": round(pptx_scale * 100, 1),
+            }
+
         return jsonify({
             "success": True,
             "sid": sid,
             "reference_b64": ref_b64,
+            "print_info": print_info,
         })
 
     except Exception as e:
@@ -493,6 +532,8 @@ Keep all illustrations, decorations, colors, and artistic elements exactly the s
             error_msg = "API 사용량 한도에 도달했습니다. 잠시 후 다시 시도해주세요."
         elif "safety" in error_msg.lower():
             error_msg = "AI 안전 필터에 의해 차단되었습니다."
+        elif "503" in error_msg or "overloaded" in error_msg.lower():
+            error_msg = "Gemini 서버가 일시적으로 과부하 상태입니다. 1~2분 후 다시 시도해주세요."
         return jsonify({"success": False, "error": error_msg}), 500
 
 
@@ -533,7 +574,7 @@ def download_file(sid, file_type):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print("=" * 50)
-    print("  🎨 AI 포스터 생성기 v2")
+    print("  🎨 AI 포스터 생성기 v3")
     print(f"  http://localhost:{port}")
     print("=" * 50)
     app.run(debug=True, host="0.0.0.0", port=port)
