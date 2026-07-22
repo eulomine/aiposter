@@ -136,7 +136,7 @@ def validate_api_key(client):
 
 def generate_image(client, prompt, aspect_ratio, image_size="2K",
                    ref_image_bytes=None, model="gemini-3.1-flash-image",
-                   max_retries=1):
+                   max_retries=3):
     """
     Gemini로 이미지를 생성하고 bytes를 반환.
     실패 시 max_retries만큼 재시도.
@@ -168,7 +168,7 @@ def generate_image(client, prompt, aspect_ratio, image_size="2K",
         except Exception as e:
             last_error = e
             if attempt < max_retries:
-                time.sleep(2)
+                time.sleep(5 * (attempt + 1))
                 continue
             raise last_error
 
