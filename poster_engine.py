@@ -220,9 +220,17 @@ def create_poster_pptx(
     슬라이드 3: 참고용 레퍼런스
     """
     prs = Presentation()
+    
+    # PPTX 최대 크기: 56인치 (142.24cm)
+    MAX_CM = 142.0
+    scale = 1.0
+    if width_cm > MAX_CM or height_cm > MAX_CM:
+        scale = min(MAX_CM / width_cm, MAX_CM / height_cm)
+        width_cm = width_cm * scale
+        height_cm = height_cm * scale
+    
     prs.slide_width = Cm(width_cm)
     prs.slide_height = Cm(height_cm)
-    blank_layout = prs.slide_layouts[6]
 
     # ── 슬라이드 1: 편집용 포스터 ──
     slide1 = prs.slides.add_slide(blank_layout)
