@@ -2,8 +2,8 @@
 poster_engine.py
 포스터 생성 엔진 — 사이즈 관리, Gemini API 호출, PPTX 조립
 모든 작업을 메모리에서 처리 (디스크 저장 없음)
-v4: blank_layout 수정, 절대 규칙, 부제 지원, 배경 프롬프트 개선,
-    텍스트 세분화, 스타일 프리셋, 3슬라이드, 재시도, PPTX 크기 제한
+v5: 듀얼 모드(Puter.js / API키), 자동 폴백, 부제 지원,
+    절대 규칙, 배경 프롬프트 개선, 3슬라이드, PPTX 크기 제한
 """
 
 import base64
@@ -111,7 +111,7 @@ def get_size_info(preset_key=None, custom_w=None, custom_h=None):
 
 
 # ============================================================
-# 3. Gemini API 호출 (재시도 포함)
+# 3. Gemini API 호출 (자동 폴백: 고화질 → 무료모델)
 # ============================================================
 
 def init_gemini(api_key: str):
@@ -133,38 +133,61 @@ def validate_api_key(client):
 
 
 def generate_image(client, prompt, aspect_ratio, image_size="2K",
-                   ref_image_bytes=None, model="gemini-3.1-flash-image",
-                   max_retries=3):
+                   ref_image_bytes=None,
+                   model="gemini-3.1-flash-image",
+                   fallback_model="gemini-3.1-flash-lite-image",
+                   max_retries=2):
+    """
+    이미지 생성 — 자동 폴백 지원.
+    1) model (고화질)로 시도
+    2) 실패 시 fallback_model (무료/저화질)로 재시도
+    반환: (image_bytes, used_model_name)
+    """
+    models_to_try = [
+        (model, image_size),
+        (fallback_model, "1K"),  # lite 모델은 1K만 지원
+    ]
+
     last_error = None
-    for attempt in range(max_retries + 1):
-        try:
-            contents = []
-            if ref_image_bytes:
-                contents.append(
-                    types.Part.from_bytes(data=ref_image_bytes, mime_type="image/jpeg")
+    for current_model, current_size in models_to_try:
+        for attempt in range(max_retries + 1):
+            try:
+                contents = []
+                if ref_image_bytes:
+                    contents.append(
+                        types.Part.from_bytes(data=ref_image_bytes, mime_type="image/jpeg")
+                    )
+                contents.append(types.Part.from_text(text=prompt))
+
+                response = client.models.generate_content(
+                    model=current_model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        response_modalities=["IMAGE", "TEXT"],
+                    ),
                 )
-            contents.append(types.Part.from_text(text=prompt))
 
-            response = client.models.generate_content(
-                model=model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    response_modalities=["IMAGE", "TEXT"],
-                ),
-            )
+                for part in response.candidates[0].content.parts:
+                    if part.inline_data and part.inline_data.mime_type.startswith("image/"):
+                        return part.inline_data.data, current_model
 
-            for part in response.candidates[0].content.parts:
-                if part.inline_data and part.inline_data.mime_type.startswith("image/"):
-                    return part.inline_data.data
+                raise RuntimeError("Gemini가 이미지를 반환하지 않았습니다.")
 
-            raise RuntimeError("Gemini가 이미지를 반환하지 않았습니다.")
+            except Exception as e:
+                last_error = e
+                error_str = str(e)
+                # 즉시 폴백해야 하는 에러 (quota, 모델 사용 불가 등)
+                if any(keyword in error_str.lower() for keyword in
+                       ["quota", "429", "resource exhausted", "not available",
+                        "not found", "permission"]):
+                    break  # 다음 모델로 넘어감
+                # 일시적 에러 → 재시도
+                if attempt < max_retries:
+                    time.sleep(5 * (attempt + 1))
+                    continue
+                break  # 재시도 다 소진, 다음 모델로
 
-        except Exception as e:
-            last_error = e
-            if attempt < max_retries:
-                time.sleep(5 * (attempt + 1))
-                continue
-            raise last_error
+    raise last_error
 
 
 def generate_text_plan(client, poster_info, model="gemini-3.5-flash"):
@@ -181,7 +204,6 @@ def generate_text_plan(client, poster_info, model="gemini-3.5-flash"):
 - 로고, 사진, QR코드 등의 공간을 미리 확보하지 마세요.
 - 전체를 그래픽과 텍스트로만 구성하세요."""
 
-    # 입력된 항목만 정보에 포함
     info_items = []
     for key, label in [
         ('title', '제목'), ('subtitle', '부제'), ('date', '날짜'),
