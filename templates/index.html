@@ -1,25 +1,719 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎨 AI 포스터 생성기</title>
+    <script src="https://js.puter.com/v2/"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', 'Malgun Gothic', sans-serif;
+            background: #0f0f23; color: #e0e0e0; min-height: 100vh;
+        }
+        .container { max-width: 900px; margin: 0 auto; padding: 30px 20px; }
+        h1 {
+            text-align: center; font-size: 2rem; margin-bottom: 10px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .page-subtitle { text-align: center; color: #888; margin-bottom: 40px; }
+
+        .steps { display: flex; justify-content: center; gap: 10px; margin-bottom: 40px; }
+        .step-badge {
+            padding: 8px 20px; border-radius: 20px; font-size: 0.9rem;
+            font-weight: 600; background: #1a1a3e; color: #555; transition: all 0.3s;
+        }
+        .step-badge.active { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
+        .step-badge.done { background: #2d5a2d; color: #8f8; }
+
+        .panel {
+            background: #1a1a3e; border-radius: 16px; padding: 30px;
+            margin-bottom: 20px; border: 1px solid #2a2a5a;
+        }
+        .panel h2 { font-size: 1.2rem; margin-bottom: 20px; color: #a0a0ff; }
+
+        label { display: block; margin-bottom: 6px; font-weight: 600; color: #c0c0e0; font-size: 0.9rem; }
+        input[type="text"], input[type="number"], input[type="password"], input[type="color"], textarea, select {
+            width: 100%; padding: 12px 16px; border: 1px solid #3a3a6a;
+            border-radius: 10px; background: #12122a; color: #e0e0e0;
+            font-size: 1rem; margin-bottom: 16px; transition: border 0.2s;
+        }
+        input:focus, textarea:focus, select:focus { outline: none; border-color: #667eea; }
+        textarea { resize: vertical; min-height: 80px; }
+        input[type="color"] {
+            width: 60px; height: 40px; padding: 2px; cursor: pointer;
+            border-radius: 8px; margin-bottom: 16px;
+        }
+        .color-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+        .color-row label { margin-bottom: 0; }
+
+        /* 모드 선택 */
+        .mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+        .mode-card {
+            padding: 20px; border: 2px solid #3a3a6a; border-radius: 14px;
+            text-align: center; cursor: pointer; transition: all 0.2s; background: #12122a;
+        }
+        .mode-card:hover { border-color: #667eea; }
+        .mode-card.selected { border-color: #667eea; background: #252560; }
+        .mode-card .mode-icon { font-size: 2rem; margin-bottom: 8px; }
+        .mode-card .mode-name { font-weight: 700; font-size: 1rem; margin-bottom: 4px; }
+        .mode-card .mode-desc { font-size: 0.75rem; color: #888; line-height: 1.4; }
+
+        .api-key-section { display: none; }
+        .api-key-section.visible { display: block; }
+        .api-key-help {
+            font-size: 0.8rem; color: #888; margin-top: -10px; margin-bottom: 16px; line-height: 1.5;
+        }
+        .api-key-help a { color: #667eea; text-decoration: none; }
+        .api-key-help a:hover { text-decoration: underline; }
+        .key-toggle {
+            background: none; border: none; color: #667eea; cursor: pointer; font-size: 0.85rem; margin-left: 8px;
+        }
+
+        .size-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 10px; margin-bottom: 16px;
+        }
+        .size-card {
+            padding: 14px 10px; border: 2px solid #3a3a6a; border-radius: 12px;
+            text-align: center; cursor: pointer; transition: all 0.2s; background: #12122a;
+        }
+        .size-card:hover { border-color: #667eea; }
+        .size-card.selected { border-color: #667eea; background: #252560; }
+        .size-card .size-name { font-weight: 700; font-size: 0.9rem; margin-bottom: 4px; }
+        .size-card .size-dim { font-size: 0.75rem; color: #888; }
+
+        .style-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 10px; margin-bottom: 16px;
+        }
+        .style-card {
+            padding: 12px 8px; border: 2px solid #3a3a6a; border-radius: 12px;
+            text-align: center; cursor: pointer; transition: all 0.2s; background: #12122a;
+            font-size: 0.85rem;
+        }
+        .style-card:hover { border-color: #667eea; }
+        .style-card.selected { border-color: #667eea; background: #252560; }
+
+        .custom-size-area { display: none; margin-bottom: 16px; }
+        .custom-size-area.visible { display: block; }
+        .custom-size-row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+        .custom-size-row input[type="number"] { width: 120px; margin-bottom: 0; }
+        .custom-size-row select { width: 100px; margin-bottom: 0; }
+        .custom-size-row span { color: #888; font-size: 1.2rem; }
+
+        .ratio-info {
+            font-size: 0.8rem; color: #888; padding: 10px; background: #12122a;
+            border-radius: 8px; margin-bottom: 16px; line-height: 1.5;
+        }
+        .ratio-info.warn { border: 1px solid #ffa500; color: #ffa; }
+        .ratio-info.match { border: 1px solid #4a4; color: #8f8; }
+
+        .upload-area {
+            border: 2px dashed #3a3a6a; border-radius: 12px; padding: 20px;
+            text-align: center; margin-bottom: 16px; cursor: pointer; transition: border 0.2s;
+        }
+        .upload-area:hover { border-color: #667eea; }
+        .upload-list { margin-bottom: 16px; }
+        .upload-item {
+            display: flex; align-items: center; gap: 10px; padding: 10px;
+            background: #12122a; border-radius: 8px; margin-bottom: 8px;
+        }
+        .upload-item img { width: 60px; height: 60px; object-fit: cover; border-radius: 6px; }
+        .upload-item input { flex: 1; margin-bottom: 0; }
+        .upload-item button {
+            background: #c0392b; border: none; color: white; padding: 6px 12px;
+            border-radius: 6px; cursor: pointer; font-size: 0.8rem;
+        }
+
+        .btn {
+            display: inline-block; padding: 14px 32px; border: none; border-radius: 12px;
+            font-size: 1rem; font-weight: 700; cursor: pointer; transition: all 0.2s;
+            text-align: center;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea, #764ba2); color: white; width: 100%;
+        }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(102,126,234,0.4); }
+        .btn-secondary {
+            background: #2a2a5a; color: #c0c0e0; margin-right: 10px;
+        }
+        .btn-secondary:hover { background: #3a3a6a; }
+        .btn-row { display: flex; gap: 10px; margin-top: 16px; }
+
+        .loading { display: none; text-align: center; padding: 40px; }
+        .loading.visible { display: block; }
+        .spinner {
+            width: 50px; height: 50px; border: 4px solid #3a3a6a; border-top-color: #667eea;
+            border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        #previewArea { display: none; text-align: center; }
+        #previewArea img { max-width: 100%; border-radius: 12px; margin-bottom: 16px; border: 1px solid #3a3a6a; }
+
+        #planText {
+            display: none; background: #12122a; padding: 20px; border-radius: 10px;
+            margin-bottom: 16px; white-space: pre-wrap; line-height: 1.7; font-size: 0.9rem;
+        }
+
+        .feedback-area { display: none; margin-top: 16px; }
+        .feedback-area.visible { display: block; }
+
+        #resultPanel { display: none; text-align: center; }
+        #resultPanel.visible { display: block; }
+        #resultPanel img { max-width: 100%; border-radius: 12px; margin-bottom: 16px; border: 1px solid #3a3a6a; }
+        #downloadLinks { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-bottom: 16px; }
+        #downloadLinks a {
+            padding: 12px 24px; background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white; border-radius: 10px; text-decoration: none; font-weight: 600;
+            transition: transform 0.2s;
+        }
+        #downloadLinks a:hover { transform: translateY(-2px); }
+
+        .model-badge {
+            display: inline-block; padding: 4px 12px; border-radius: 20px;
+            font-size: 0.75rem; font-weight: 700; margin-bottom: 10px;
+        }
+        .model-badge.hq { background: #2d5a2d; color: #8f8; }
+        .model-badge.free { background: #5a4a2d; color: #ffa; }
+
+        .print-info {
+            background: #1a1a3e; padding: 12px 16px; border-radius: 8px;
+            font-size: 0.85rem; color: #ffa; margin-bottom: 16px; line-height: 1.6;
+            border: 1px solid #5a4a2d;
+        }
+        .quality-note {
+            background: #1a1a3e; padding: 10px 14px; border-radius: 8px;
+            font-size: 0.85rem; color: #aaf; margin-bottom: 16px;
+            border: 1px solid #4a4a7a;
+        }
+
+        .warn-box {
+            background: #2a2a1a; border: 1px solid #5a4a2d; border-radius: 8px;
+            padding: 10px 14px; font-size: 0.8rem; color: #ffa; margin-bottom: 16px; line-height: 1.5;
+        }
+
+        .section-step { display: none; }
+        .section-step.active { display: block; }
+
+        @media (max-width: 600px) {
+            .mode-grid { grid-template-columns: 1fr; }
+            .size-grid { grid-template-columns: repeat(2, 1fr); }
+            .style-grid { grid-template-columns: repeat(2, 1fr); }
+            .btn-row { flex-direction: column; }
+            #downloadLinks { flex-direction: column; align-items: center; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🎨 AI 포스터 생성기</h1>
+    <p class="page-subtitle">AI가 디자인하고, PPTX로 편집하세요</p>
+
+    <div class="steps">
+        <span class="step-badge active" id="stepBadge1">1. 정보 입력</span>
+        <span class="step-badge" id="stepBadge2">2. 초안 확인</span>
+        <span class="step-badge" id="stepBadge3">3. 최종 생성</span>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- STEP 1: 정보 입력 -->
+    <!-- ============================================================ -->
+    <div class="section-step active" id="step1">
+
+        <!-- 모드 선택 -->
+        <div class="panel">
+            <h2>🔑 생성 방식 선택</h2>
+            <div class="mode-grid">
+                <div class="mode-card selected" data-mode="puter" onclick="selectMode('puter')">
+                    <div class="mode-icon">🌐</div>
+                    <div class="mode-name">Puter.js (무료)</div>
+                    <div class="mode-desc">API 키 불필요<br>Puter 계정 크레딧 사용<br>브라우저에서 직접 생성</div>
+                </div>
+                <div class="mode-card" data-mode="apikey" onclick="selectMode('apikey')">
+                    <div class="mode-icon">🔑</div>
+                    <div class="mode-name">내 Gemini API 키</div>
+                    <div class="mode-desc">직접 발급한 API 키 사용<br>고화질 자동 시도<br>실패 시 무료 모델 폴백</div>
+                </div>
+            </div>
+            <div class="api-key-section" id="apiKeySection">
+                <label>Gemini API 키
+                    <button type="button" class="key-toggle" onclick="toggleKeyVisibility()">👁 보기</button>
+                </label>
+                <input type="password" id="apiKey" placeholder="AIzaSy...">
+                <div class="api-key-help">
+                    <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a>에서 무료로 발급받을 수 있습니다.<br>
+                    Tier 1(유료 계정)이면 고화질, 무료 계정이면 자동으로 무료 모델로 전환됩니다.
+                </div>
+            </div>
+        </div>
+
+        <!-- 크기 선택 -->
+        <div class="panel">
+            <h2>📐 포스터 크기</h2>
+            <div class="size-grid" id="sizeGrid"></div>
+            <div class="custom-size-area" id="customSizeArea">
+                <div class="custom-size-row">
+                    <input type="number" id="customWidth" placeholder="가로" min="1" oninput="updateRatioInfo()">
+                    <span>×</span>
+                    <input type="number" id="customHeight" placeholder="세로" min="1" oninput="updateRatioInfo()">
+                    <select id="customUnit" onchange="updateRatioInfo()">
+                        <option value="cm">cm</option>
+                        <option value="mm">mm</option>
+                        <option value="m">m</option>
+                    </select>
+                </div>
+                <div class="ratio-info" id="ratioInfo"></div>
+            </div>
+        </div>
+
+        <!-- 스타일 선택 -->
+        <div class="panel">
+            <h2>🎨 디자인 스타일</h2>
+            <div class="style-grid" id="styleGrid"></div>
+            <div id="customStyleArea" style="display:none;">
+                <label>커스텀 스타일 설명</label>
+                <textarea id="customStyle" placeholder="원하는 디자인 스타일을 자유롭게 설명하세요..."></textarea>
+            </div>
+        </div>
+
+        <!-- 포스터 정보 -->
+        <div class="panel">
+            <h2>📝 포스터 정보</h2>
+            <div class="warn-box">⚠️ 입력하지 않은 항목은 포스터에 표시되지 않습니다. AI가 임의로 정보를 추가하지 않습니다.</div>
+
+            <label>제목 (필수)</label>
+            <input type="text" id="title" placeholder="예: 2025 여름 음악 축제">
+
+            <label>부제</label>
+            <input type="text" id="subtitle" placeholder="예: 음악으로 하나되는 여름밤">
+
+            <label>날짜 / 기간</label>
+            <input type="text" id="date" placeholder="예: 2025년 8월 15일 (금)">
+
+            <label>장소</label>
+            <input type="text" id="venue" placeholder="예: 서울 올림픽공원 잔디마당">
+
+            <label>주관 / 주최</label>
+            <input type="text" id="organizer" placeholder="예: 서울시, 문화재단">
+
+            <label>필수 포함 내용</label>
+            <textarea id="content" placeholder="포스터에 반드시 들어가야 할 내용을 입력하세요..."></textarea>
+
+            <label>AI에게 추가 지시</label>
+            <textarea id="additional" placeholder="디자인 관련 추가 요청사항 (선택)"></textarea>
+
+            <label>분위기 / 무드</label>
+            <input type="text" id="mood" placeholder="예: 신나는, 축제 분위기, 여름 느낌">
+
+            <div class="color-row">
+                <label>텍스트 색상</label>
+                <input type="color" id="fontColor" value="#ffffff">
+            </div>
+        </div>
+
+        <!-- 이미지 업로드 -->
+        <div class="panel">
+            <h2>🖼️ 이미지 업로드 (선택)</h2>
+            <p style="font-size:0.8rem; color:#888; margin-bottom:12px;">
+                로고, 사진, QR코드 등을 업로드하면 포스터에 배치됩니다. 각 이미지의 설명을 입력해주세요.
+            </p>
+            <div class="upload-area" onclick="document.getElementById('uploadInput').click()">
+                📁 클릭하여 이미지 추가
+            </div>
+            <input type="file" id="uploadInput" accept="image/*" multiple style="display:none" onchange="handleUpload(this)">
+            <div class="upload-list" id="uploadList"></div>
+        </div>
+
+        <!-- 폰트 / 참고 이미지 -->
+        <div class="panel">
+            <h2>📎 추가 옵션</h2>
+            <label>참고 이미지 (선택)</label>
+            <input type="file" id="refImage" accept="image/*">
+            <p style="font-size:0.8rem; color:#888; margin-top:-10px; margin-bottom:16px;">
+                참고하고 싶은 디자인 이미지를 올리면 AI가 스타일을 참고합니다.
+            </p>
+
+            <label>폰트 파일 (선택, .ttf/.otf)</label>
+            <input type="file" id="fontFile" accept=".ttf,.otf">
+        </div>
+
+        <button class="btn btn-primary" onclick="submitPlan()">🎨 디자인 초안 만들기</button>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- STEP 2: 초안 확인 -->
+    <!-- ============================================================ -->
+    <div class="section-step" id="step2">
+        <div class="panel">
+            <h2>🖼️ 디자인 초안</h2>
+            <div class="loading" id="loading2">
+                <div class="spinner"></div>
+                <p id="loadingMsg2">디자인 중...</p>
+            </div>
+            <div id="previewArea">
+                <div id="modelBadge"></div>
+                <img id="sketchImg" alt="초안">
+            </div>
+            <div id="planText"></div>
+            <div class="feedback-area" id="feedbackArea">
+                <label>수정 요청</label>
+                <textarea id="feedback" placeholder="수정하고 싶은 부분을 알려주세요..."></textarea>
+                <div class="btn-row">
+                    <button class="btn btn-secondary" onclick="submitRevise()">🔄 수정하기</button>
+                    <button class="btn btn-primary" onclick="goToStep3()" style="flex:1">✅ 이대로 최종 생성</button>
+                </div>
+                <p style="font-size:0.75rem; color:#666; margin-top:8px; text-align:center;">
+                    💡 Puter 모드에서는 크레딧 절약을 위해 수정사항을 모아뒀다가 최종 생성 시 한 번에 반영합니다.
+                </p>
+            </div>
+            <div style="margin-top:12px;">
+                <button class="btn btn-secondary" onclick="setStep(1)">← 정보 수정</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- STEP 3: 최종 생성 -->
+    <!-- ============================================================ -->
+    <div class="section-step" id="step3">
+        <div class="panel">
+            <h2>🎉 최종 포스터</h2>
+            <div class="loading" id="loading3">
+                <div class="spinner"></div>
+                <p id="loadingMsg3">최종 생성 중...</p>
+            </div>
+            <div id="resultPanel">
+                <img id="finalImg" alt="최종 포스터">
+                <div id="printInfoArea"></div>
+                <div id="qualityNoteArea"></div>
+                <div id="downloadLinks"></div>
+                <p style="font-size:0.8rem; color:#888; margin-bottom:16px;">
+                    ⏰ 다운로드 링크는 10분 후 만료됩니다.<br>
+                    📌 PPTX 슬라이드 구성: 1) 편집용 (배경+텍스트박스) 2) AI 원본 3) 참고용
+                </p>
+                <button class="btn btn-secondary" onclick="setStep(1)">← 새 포스터 만들기</button>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
 // ============================================================
-// Puter.js 헬퍼: 이미지 생성 (에러 핸들링 강화)
+// 전역 변수
+// ============================================================
+let currentMode = 'puter';
+let selectedPreset = null;
+let selectedStyle = null;
+let uploadedImages = [];
+let currentSid = null;
+let puterSketchB64 = null;
+let puterOriginalB64 = null;
+let puterBackgroundB64 = null;
+let puterFeedbackList = [];
+
+const SIZE_PRESETS = {
+    "A3_landscape":   { name: "A3 가로",      w: 42.0,  h: 29.7  },
+    "A3_portrait":    { name: "A3 세로",      w: 29.7,  h: 42.0  },
+    "16:9_landscape": { name: "16:9 가로",    w: 50.8,  h: 28.575 },
+    "16:9_portrait":  { name: "16:9 세로",    w: 28.575, h: 50.8  },
+    "square":         { name: "정방형 (1:1)",  w: 40.0,  h: 40.0  },
+    "banner_h":       { name: "가로 배너",     w: 120.0, h: 30.0  },
+    "banner_v":       { name: "세로 배너",     w: 30.0,  h: 120.0 },
+    "hanging_banner": { name: "가로 현수막",   w: 500.0, h: 90.0  },
+    "custom":         { name: "직접 입력",     w: 0,     h: 0     },
+};
+
+const STYLE_PRESETS = {
+    "cute_illust": "귀여운 일러스트",
+    "corporate":   "깔끔한 기업형",
+    "photo_real":  "실사 사진풍",
+    "watercolor":  "수채화풍",
+    "minimal":     "미니멀 / 타이포",
+    "retro":       "레트로 / 빈티지",
+    "pop_art":     "팝아트 / 컬러풀",
+    "elegant":     "고급스러운 / 포멀",
+    "custom":      "직접 입력",
+};
+
+const GEMINI_RATIOS = [
+    [1,1],[3,2],[2,3],[3,4],[4,3],[4,5],[5,4],[9,16],[16,9],[21,9],[9,21],[1,4],[4,1],[1,8],[8,1]
+];
+
+// ============================================================
+// 모드 선택
+// ============================================================
+function selectMode(mode) {
+    currentMode = mode;
+    document.querySelectorAll('.mode-card').forEach(c => {
+        c.classList.toggle('selected', c.dataset.mode === mode);
+    });
+    document.getElementById('apiKeySection').classList.toggle('visible', mode === 'apikey');
+}
+
+function toggleKeyVisibility() {
+    const inp = document.getElementById('apiKey');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+// ============================================================
+// 스텝 관리
+// ============================================================
+function setStep(n) {
+    [1,2,3].forEach(i => {
+        document.getElementById(`step${i}`).classList.toggle('active', i === n);
+        const badge = document.getElementById(`stepBadge${i}`);
+        badge.classList.remove('active', 'done');
+        if (i < n) badge.classList.add('done');
+        if (i === n) badge.classList.add('active');
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ============================================================
+// 크기 그리드
+// ============================================================
+function buildSizeGrid() {
+    const grid = document.getElementById('sizeGrid');
+    grid.innerHTML = '';
+    for (const [key, info] of Object.entries(SIZE_PRESETS)) {
+        const card = document.createElement('div');
+        card.className = 'size-card';
+        card.dataset.key = key;
+        if (key === 'custom') {
+            card.innerHTML = `<div class="size-name">${info.name}</div><div class="size-dim">자유 크기</div>`;
+        } else {
+            card.innerHTML = `<div class="size-name">${info.name}</div><div class="size-dim">${info.w} × ${info.h} cm</div>`;
+        }
+        card.onclick = () => selectSize(key);
+        grid.appendChild(card);
+    }
+}
+
+function selectSize(key) {
+    selectedPreset = key;
+    document.querySelectorAll('.size-card').forEach(c => {
+        c.classList.toggle('selected', c.dataset.key === key);
+    });
+    document.getElementById('customSizeArea').classList.toggle('visible', key === 'custom');
+    if (key !== 'custom') updateRatioInfo();
+}
+
+function findClosestRatio(w, h) {
+    const target = w / h;
+    let best = null, bestDiff = Infinity;
+    for (const [rw, rh] of GEMINI_RATIOS) {
+        const diff = Math.abs(Math.log(target) - Math.log(rw / rh));
+        if (diff < bestDiff) { bestDiff = diff; best = [rw, rh]; }
+    }
+    return { ratio: best, diff: bestDiff };
+}
+
+function updateRatioInfo() {
+    const infoEl = document.getElementById('ratioInfo');
+    let w, h;
+    if (selectedPreset === 'custom') {
+        const unit = document.getElementById('customUnit').value;
+        w = parseFloat(document.getElementById('customWidth').value) || 0;
+        h = parseFloat(document.getElementById('customHeight').value) || 0;
+        if (unit === 'm') { w *= 100; h *= 100; }
+        if (unit === 'mm') { w /= 10; h /= 10; }
+    } else if (selectedPreset && SIZE_PRESETS[selectedPreset]) {
+        w = SIZE_PRESETS[selectedPreset].w;
+        h = SIZE_PRESETS[selectedPreset].h;
+    }
+    if (!w || !h) { infoEl.textContent = ''; infoEl.className = 'ratio-info'; return; }
+    const { ratio, diff } = findClosestRatio(w, h);
+    const pct = (1 - Math.exp(-diff)) * 100;
+    if (pct < 3) {
+        infoEl.textContent = `✅ Gemini 비율 ${ratio[0]}:${ratio[1]}과 거의 일치합니다.`;
+        infoEl.className = 'ratio-info match';
+    } else {
+        infoEl.textContent = `⚠️ 가장 가까운 Gemini 비율: ${ratio[0]}:${ratio[1]} (약 ${pct.toFixed(1)}% 차이). 이미지가 약간 잘리거나 늘어날 수 있습니다.`;
+        infoEl.className = 'ratio-info warn';
+    }
+}
+
+// ============================================================
+// 스타일 그리드
+// ============================================================
+function buildStyleGrid() {
+    const grid = document.getElementById('styleGrid');
+    grid.innerHTML = '';
+    for (const [key, name] of Object.entries(STYLE_PRESETS)) {
+        const card = document.createElement('div');
+        card.className = 'style-card';
+        card.dataset.key = key;
+        card.textContent = name;
+        card.onclick = () => selectStyle(key);
+        grid.appendChild(card);
+    }
+}
+
+function selectStyle(key) {
+    selectedStyle = key;
+    document.querySelectorAll('.style-card').forEach(c => {
+        c.classList.toggle('selected', c.dataset.key === key);
+    });
+    document.getElementById('customStyleArea').style.display = key === 'custom' ? 'block' : 'none';
+}
+
+// ============================================================
+// 이미지 업로드
+// ============================================================
+function handleUpload(input) {
+    const files = Array.from(input.files);
+    files.forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            uploadedImages.push({ file, preview: e.target.result, description: '' });
+            renderUploadList();
+        };
+        reader.readAsDataURL(file);
+    });
+    input.value = '';
+}
+
+function renderUploadList() {
+    const list = document.getElementById('uploadList');
+    list.innerHTML = '';
+    uploadedImages.forEach((item, idx) => {
+        const div = document.createElement('div');
+        div.className = 'upload-item';
+        div.innerHTML = `
+            <img src="${item.preview}" alt="upload">
+            <input type="text" placeholder="이미지 설명 (예: 로고, QR코드)" 
+                   value="${item.description}" onchange="uploadedImages[${idx}].description=this.value">
+            <button onclick="uploadedImages.splice(${idx},1);renderUploadList()">삭제</button>
+        `;
+        list.appendChild(div);
+    });
+}
+
+// ============================================================
+// 프롬프트 빌더
+// ============================================================
+function getGeminiRatioForPrompt() {
+    let w, h;
+    if (selectedPreset === 'custom') {
+        const unit = document.getElementById('customUnit').value;
+        w = parseFloat(document.getElementById('customWidth').value) || 40;
+        h = parseFloat(document.getElementById('customHeight').value) || 40;
+        if (unit === 'm') { w *= 100; h *= 100; }
+        if (unit === 'mm') { w /= 10; h /= 10; }
+    } else {
+        const p = SIZE_PRESETS[selectedPreset];
+        w = p.w; h = p.h;
+    }
+    const { ratio } = findClosestRatio(w, h);
+    return ratio;
+}
+
+function buildSketchPrompt() {
+    const title = document.getElementById('title').value;
+    const subtitle = document.getElementById('subtitle').value;
+    const date = document.getElementById('date').value;
+    const venue = document.getElementById('venue').value;
+    const organizer = document.getElementById('organizer').value;
+    const content = document.getElementById('content').value;
+    const additional = document.getElementById('additional').value;
+    const mood = document.getElementById('mood').value;
+    const styleName = selectedStyle ? (STYLE_PRESETS[selectedStyle] || '커스텀') : '';
+    const customStyleText = selectedStyle === 'custom' ? document.getElementById('customStyle').value : '';
+    const ratio = getGeminiRatioForPrompt();
+
+    let info = [];
+    if (title) info.push(`Title: ${title}`);
+    if (subtitle) info.push(`Subtitle: ${subtitle}`);
+    if (date) info.push(`Date: ${date}`);
+    if (venue) info.push(`Venue: ${venue}`);
+    if (organizer) info.push(`Organizer: ${organizer}`);
+    if (content) info.push(`Content: ${content}`);
+
+    let uploadDesc = '';
+    if (uploadedImages.length > 0) {
+        const descs = uploadedImages.map((img, i) => `Image ${i+1}: ${img.description || 'no description'}`).join(', ');
+        uploadDesc = `\nUploaded images to include: ${descs}. Leave appropriate space for them.`;
+    }
+
+    return `Create a professional Korean poster design.
+Aspect ratio: ${ratio[0]}:${ratio[1]}
+Style: ${styleName} ${customStyleText}
+${mood ? 'Mood: ' + mood : ''}
+
+Information to include:
+${info.join('\n')}
+
+[ABSOLUTE RULES]
+1. Only include information listed above. Do NOT invent phone numbers, emails, websites, registration methods, or any other info.
+2. If no images are uploaded, do NOT leave spaces for logos or photos.
+3. All Korean text must be clearly readable and correctly spelled.
+${uploadDesc}
+${additional ? '\nAdditional instructions: ' + additional : ''}
+
+Design a visually stunning poster with this information. The text should be naturally integrated into the design.`;
+}
+
+function buildBgRemovePrompt() {
+    return `Remove ALL text from this poster image. Remove every single character - titles, subtitles, dates, venue names, organizer names, and any Korean/English text.
+Keep all design elements exactly as they are: boxes, frames, panels, shapes, colors, textures, illustrations.
+If text was inside a colored box, keep the box with its original color but remove the text.
+Fill removed text areas with the same background. Do NOT change colors or add new elements.`;
+}
+
+function buildPlanPrompt() {
+    const title = document.getElementById('title').value;
+    const subtitle = document.getElementById('subtitle').value;
+    const date = document.getElementById('date').value;
+    const venue = document.getElementById('venue').value;
+    const organizer = document.getElementById('organizer').value;
+    const content = document.getElementById('content').value;
+    const additional = document.getElementById('additional').value;
+    const mood = document.getElementById('mood').value;
+
+    let info = [];
+    if (title) info.push(`제목: ${title}`);
+    if (subtitle) info.push(`부제: ${subtitle}`);
+    if (date) info.push(`날짜: ${date}`);
+    if (venue) info.push(`장소: ${venue}`);
+    if (organizer) info.push(`주관: ${organizer}`);
+    if (content) info.push(`내용: ${content}`);
+    if (additional) info.push(`추가 요청: ${additional}`);
+    if (mood) info.push(`분위기: ${mood}`);
+
+    return `당신은 전문 포스터 디자이너입니다. 다음 정보로 포스터 디자인을 계획해주세요.
+
+[절대 규칙]
+1. 아래 입력된 정보만 사용하세요. 전화번호, 이메일, 홈페이지 등을 임의로 만들지 마세요.
+2. 입력되지 않은 항목은 완전히 제외하세요.
+
+${info.join('\n')}
+
+다음을 포함해서 간결하게 답변해주세요:
+1) 전체 색감과 분위기
+2) 텍스트 배치 계획
+3) 추천 장식 요소`;
+}
+
+// ============================================================
+// Puter.js 헬퍼
 // ============================================================
 async function puterGenerateImage(prompt, options = {}) {
     try {
         const model = options.model || 'google/gemini-3.1-flash-image-preview';
         const imgOpts = { model };
-        
-        // input_image가 있으면 image-to-image
-        if (options.input_image) {
-            imgOpts.input_image = options.input_image;
-        }
-        // 비율 설정
-        if (options.ratio) {
-            imgOpts.ratio = options.ratio;
-        }
-        
+        if (options.input_image) imgOpts.input_image = options.input_image;
+        if (options.ratio) imgOpts.ratio = options.ratio;
+
+        const ratio = getGeminiRatioForPrompt();
+        if (!options.ratio) imgOpts.ratio = { w: ratio[0], h: ratio[1] };
+
         const img = await puter.ai.txt2img(prompt, imgOpts);
-        
-        // HTMLImageElement → base64 변환
+
         return new Promise((resolve, reject) => {
-            // 이미 로드된 이미지일 수도 있으므로 둘 다 처리
             const convert = () => {
                 const canvas = document.createElement('canvas');
                 canvas.width = img.naturalWidth || img.width;
@@ -37,8 +731,7 @@ async function puterGenerateImage(prompt, options = {}) {
         });
     } catch (e) {
         const errMsg = (e.message || e.toString() || '').toLowerCase();
-        // Low Balance / 크레딧 부족 감지
-        if (errMsg.includes('balance') || errMsg.includes('funding') || 
+        if (errMsg.includes('balance') || errMsg.includes('funding') ||
             errMsg.includes('upgrade') || errMsg.includes('insufficient') ||
             errMsg.includes('credit')) {
             throw new Error('PUTER_LOW_BALANCE');
@@ -53,32 +746,73 @@ async function puterChat(prompt) {
 }
 
 // ============================================================
-// Puter 모드: 수정 요청 (이미지 재생성 없이 피드백만 저장)
+// FormData 빌더
 // ============================================================
-let puterFeedbackList = []; // 수정 피드백 누적 저장
+function buildCommonFormData() {
+    const formData = new FormData();
 
-async function submitRevisePuter() {
-    const feedback = document.getElementById('feedback').value.trim();
-    if (!feedback) { alert('수정할 내용을 입력해주세요!'); return; }
-    
-    puterFeedbackList.push(feedback);
-    
-    // 피드백이 반영될 것임을 사용자에게 알림
-    const planTextEl = document.getElementById('planText');
-    planTextEl.style.display = 'block';
-    planTextEl.innerHTML = `<div style="color:#ffa; margin-bottom:10px;">📝 누적된 수정 요청 (${puterFeedbackList.length}건):</div>`;
-    puterFeedbackList.forEach((fb, i) => {
-        planTextEl.innerHTML += `<div style="margin-bottom:6px; padding:8px; background:#1a1a3e; border-radius:6px; border-left:3px solid #667eea;">${i+1}. ${fb}</div>`;
+    if (selectedPreset === 'custom') {
+        formData.append('size_type', 'custom');
+        const unit = document.getElementById('customUnit').value;
+        let w = parseFloat(document.getElementById('customWidth').value);
+        let h = parseFloat(document.getElementById('customHeight').value);
+        if (unit === 'm') { w *= 100; h *= 100; }
+        if (unit === 'mm') { w /= 10; h /= 10; }
+        formData.append('custom_width', w);
+        formData.append('custom_height', h);
+    } else {
+        formData.append('size_type', 'preset');
+        formData.append('preset', selectedPreset);
+    }
+
+    formData.append('style_preset', selectedStyle || 'custom');
+    formData.append('mood', document.getElementById('mood').value);
+    formData.append('title', document.getElementById('title').value);
+    formData.append('subtitle', document.getElementById('subtitle').value);
+    formData.append('date', document.getElementById('date').value);
+    formData.append('venue', document.getElementById('venue').value);
+    formData.append('organizer', document.getElementById('organizer').value);
+    formData.append('content', document.getElementById('content').value);
+    formData.append('additional', document.getElementById('additional').value);
+    formData.append('font_color', document.getElementById('fontColor').value.replace('#', ''));
+
+    if (selectedStyle === 'custom') {
+        formData.append('custom_style', document.getElementById('customStyle').value);
+    }
+
+    uploadedImages.forEach((item, idx) => {
+        formData.append(`upload_image_${idx}`, item.file);
+        formData.append(`upload_desc_${idx}`, item.description);
     });
-    planTextEl.innerHTML += `<div style="color:#8f8; margin-top:12px;">✅ "이대로 최종 생성"을 누르면 위 수정사항이 모두 반영됩니다.</div>`;
-    
-    document.getElementById('feedback').value = '';
-    alert('수정 요청이 저장되었습니다!\n"이대로 최종 생성"을 누르면 모든 수정사항이 반영됩니다.\n\n💡 Puter 모드에서는 크레딧 절약을 위해 최종 생성 시 한 번에 반영됩니다.');
+
+    const fontFile = document.getElementById('fontFile').files[0];
+    if (fontFile) formData.append('font_file', fontFile);
+
+    return formData;
 }
 
 // ============================================================
-// Puter 모드: 디자인 초안 생성
+// 디자인 초안 생성 (분기)
 // ============================================================
+async function submitPlan() {
+    if (!selectedPreset) { alert('포스터 크기를 선택해주세요!'); return; }
+    if (!document.getElementById('title').value.trim()) { alert('제목을 입력해주세요!'); return; }
+    if (selectedPreset === 'custom') {
+        const w = parseFloat(document.getElementById('customWidth').value);
+        const h = parseFloat(document.getElementById('customHeight').value);
+        if (!w || !h) { alert('커스텀 크기를 입력해주세요!'); return; }
+    }
+
+    if (currentMode === 'apikey') {
+        const apiKey = document.getElementById('apiKey').value.trim();
+        if (!apiKey) { alert('Gemini API 키를 입력해주세요!'); return; }
+        await submitPlanApiKey();
+    } else {
+        await submitPlanPuter();
+    }
+}
+
+// ── Puter 모드: 초안 ──
 async function submitPlanPuter() {
     setStep(2);
     document.getElementById('loading2').classList.add('visible');
@@ -86,19 +820,16 @@ async function submitPlanPuter() {
     document.getElementById('previewArea').style.display = 'none';
     document.getElementById('planText').style.display = 'none';
     document.getElementById('feedbackArea').classList.remove('visible');
-    puterFeedbackList = []; // 수정 피드백 초기화
+    puterFeedbackList = [];
 
     try {
-        // 1) 텍스트 플랜 생성
         const planPrompt = buildPlanPrompt();
         const planText = await puterChat(planPrompt);
 
-        // 2) 스케치 이미지 생성
         const sketchPrompt = buildSketchPrompt();
         puterSketchB64 = await puterGenerateImage(sketchPrompt);
 
-        // 3) 서버에 세션 저장 (PPTX용)
-        const formData = buildPuterFormData();
+        const formData = buildCommonFormData();
         formData.append('sketch_b64', puterSketchB64);
         formData.append('plan_text', planText);
 
@@ -107,7 +838,6 @@ async function submitPlanPuter() {
         if (!result.success) throw new Error(result.error || '서버 오류');
         currentSid = result.sid;
 
-        // UI 업데이트
         document.getElementById('loading2').classList.remove('visible');
         document.getElementById('sketchImg').src = 'data:image/jpeg;base64,' + puterSketchB64;
         document.getElementById('previewArea').style.display = 'block';
@@ -128,8 +858,53 @@ async function submitPlanPuter() {
     }
 }
 
+// ── API키 모드: 초안 ──
+async function submitPlanApiKey() {
+    setStep(2);
+    document.getElementById('loading2').classList.add('visible');
+    document.getElementById('loadingMsg2').textContent = 'Gemini API로 디자인 중... (30초~1분)';
+    document.getElementById('previewArea').style.display = 'none';
+    document.getElementById('planText').style.display = 'none';
+    document.getElementById('feedbackArea').classList.remove('visible');
+
+    try {
+        const formData = buildCommonFormData();
+        formData.append('api_key', document.getElementById('apiKey').value.trim());
+
+        const refFile = document.getElementById('refImage').files[0];
+        if (refFile) formData.append('reference_image', refFile);
+
+        const resp = await fetch('/api/plan', { method: 'POST', body: formData });
+        const result = await resp.json();
+        if (!result.success) throw new Error(result.error || '서버 오류');
+
+        currentSid = result.sid;
+        localStorage.setItem('gemini_api_key', document.getElementById('apiKey').value.trim());
+
+        document.getElementById('loading2').classList.remove('visible');
+        document.getElementById('sketchImg').src = 'data:image/jpeg;base64,' + result.sketch_b64;
+        document.getElementById('previewArea').style.display = 'block';
+
+        if (result.used_model) {
+            const isLite = result.used_model.includes('lite');
+            document.getElementById('modelBadge').innerHTML = isLite
+                ? '<span class="model-badge free">무료 모델 (1K)</span>'
+                : '<span class="model-badge hq">고화질 모델</span>';
+        }
+
+        document.getElementById('planText').style.display = 'block';
+        document.getElementById('planText').textContent = result.plan_text;
+        document.getElementById('feedbackArea').classList.add('visible');
+
+    } catch (e) {
+        document.getElementById('loading2').classList.remove('visible');
+        alert('오류: ' + e.message);
+        setStep(1);
+    }
+}
+
 // ============================================================
-// 수정 요청 분기 (Puter vs API키)
+// 수정 요청 (분기)
 // ============================================================
 async function submitRevise() {
     if (currentMode === 'puter') {
@@ -139,8 +914,64 @@ async function submitRevise() {
     }
 }
 
+// ── Puter 수정: 이미지 재생성 없이 피드백만 저장 ──
+async function submitRevisePuter() {
+    const feedback = document.getElementById('feedback').value.trim();
+    if (!feedback) { alert('수정할 내용을 입력해주세요!'); return; }
+
+    puterFeedbackList.push(feedback);
+
+    const planTextEl = document.getElementById('planText');
+    planTextEl.style.display = 'block';
+    planTextEl.innerHTML = `<div style="color:#ffa; margin-bottom:10px;">📝 누적된 수정 요청 (${puterFeedbackList.length}건):</div>`;
+    puterFeedbackList.forEach((fb, i) => {
+        planTextEl.innerHTML += `<div style="margin-bottom:6px; padding:8px; background:#12122a; border-radius:6px; border-left:3px solid #667eea;">${i + 1}. ${fb}</div>`;
+    });
+    planTextEl.innerHTML += `<div style="color:#8f8; margin-top:12px;">✅ "이대로 최종 생성"을 누르면 위 수정사항이 모두 반영됩니다.</div>`;
+
+    document.getElementById('feedback').value = '';
+    alert('수정 요청이 저장되었습니다!\n"이대로 최종 생성"을 누르면 모든 수정사항이 반영됩니다.\n\n💡 Puter 모드에서는 크레딧 절약을 위해 최종 생성 시 한 번에 반영됩니다.');
+}
+
+// ── API키 수정: 서버에서 이미지 재생성 ──
+async function submitReviseApiKey() {
+    const feedback = document.getElementById('feedback').value.trim();
+    if (!feedback) { alert('수정할 내용을 입력해주세요!'); return; }
+
+    document.getElementById('loading2').classList.add('visible');
+    document.getElementById('loadingMsg2').textContent = '수정 중...';
+    document.getElementById('previewArea').style.display = 'none';
+
+    try {
+        const formData = new FormData();
+        formData.append('sid', currentSid);
+        formData.append('feedback', feedback);
+
+        const resp = await fetch('/api/revise', { method: 'POST', body: formData });
+        const result = await resp.json();
+        if (!result.success) throw new Error(result.error || '서버 오류');
+
+        document.getElementById('loading2').classList.remove('visible');
+        document.getElementById('sketchImg').src = 'data:image/jpeg;base64,' + result.sketch_b64;
+        document.getElementById('previewArea').style.display = 'block';
+
+        if (result.used_model) {
+            const isLite = result.used_model.includes('lite');
+            document.getElementById('modelBadge').innerHTML = isLite
+                ? '<span class="model-badge free">무료 모델 (1K)</span>'
+                : '<span class="model-badge hq">고화질 모델</span>';
+        }
+        document.getElementById('feedback').value = '';
+
+    } catch (e) {
+        document.getElementById('loading2').classList.remove('visible');
+        document.getElementById('previewArea').style.display = 'block';
+        alert('수정 오류: ' + e.message);
+    }
+}
+
 // ============================================================
-// 최종 생성 분기
+// 최종 생성 (분기)
 // ============================================================
 async function goToStep3() {
     if (currentMode === 'puter') {
@@ -150,9 +981,7 @@ async function goToStep3() {
     }
 }
 
-// ============================================================
-// Puter 모드: 최종 생성 (수정 피드백 반영)
-// ============================================================
+// ── Puter 최종 생성 ──
 async function generateFinalPuter() {
     setStep(3);
     document.getElementById('loading3').classList.add('visible');
@@ -160,10 +989,9 @@ async function generateFinalPuter() {
     document.getElementById('resultPanel').classList.remove('visible');
 
     try {
-        // 수정 피드백이 있으면 반영한 프롬프트로 다시 생성
         let finalPrompt;
         if (puterFeedbackList.length > 0) {
-            const feedbackText = puterFeedbackList.map((fb, i) => `${i+1}. ${fb}`).join('\n');
+            const feedbackText = puterFeedbackList.map((fb, i) => `${i + 1}. ${fb}`).join('\n');
             finalPrompt = buildSketchPrompt() + `\n\nIMPORTANT REVISIONS to apply:\n${feedbackText}\n\nMake this the FINAL high-quality version with all revisions applied. Polish everything to be crisp and professional.`;
         } else {
             finalPrompt = `Based on this draft design, create the FINAL high-quality poster.
@@ -172,9 +1000,8 @@ Make everything polished, crisp, and professional.
 All Korean text must be accurate and readable.`;
         }
 
-        // 1) 최종 이미지 생성 (초안을 input_image로 활용)
+        // 1) 최종 이미지
         document.getElementById('loadingMsg3').textContent = '최종 이미지 생성 중... (1/2)';
-        
         let originalB64;
         try {
             originalB64 = await puterGenerateImage(finalPrompt, {
@@ -182,17 +1009,13 @@ All Korean text must be accurate and readable.`;
             });
         } catch (e) {
             if (e.message === 'PUTER_LOW_BALANCE') {
-                // 크레딧 부족 → 초안을 그대로 최종본으로 사용
                 originalB64 = puterSketchB64;
                 alert('⚠️ Puter 크레딧이 부족하여 초안 이미지를 최종본으로 사용합니다.\nPPTX에서 텍스트를 직접 수정하실 수 있습니다.');
-            } else {
-                throw e;
-            }
+            } else { throw e; }
         }
 
-        // 2) 배경 이미지 생성 (텍스트 제거)
+        // 2) 배경 이미지
         document.getElementById('loadingMsg3').textContent = '배경 이미지 생성 중... (2/2)';
-        
         let backgroundB64;
         try {
             backgroundB64 = await puterGenerateImage(buildBgRemovePrompt(), {
@@ -200,19 +1023,15 @@ All Korean text must be accurate and readable.`;
             });
         } catch (e) {
             if (e.message === 'PUTER_LOW_BALANCE') {
-                // 크레딧 부족 → 원본을 배경으로도 사용
                 backgroundB64 = originalB64;
-            } else {
-                throw e;
-            }
+            } else { throw e; }
         }
 
         puterOriginalB64 = originalB64;
         puterBackgroundB64 = backgroundB64;
 
-        // 3) 서버에서 PPTX 조립
+        // 3) PPTX 조립
         document.getElementById('loadingMsg3').textContent = 'PPTX 조립 중...';
-        
         const formData = new FormData();
         formData.append('sid', currentSid);
         formData.append('original_b64', originalB64);
@@ -222,10 +1041,9 @@ All Korean text must be accurate and readable.`;
         const result = await resp.json();
         if (!result.success) throw new Error(result.error || '서버 오류');
 
-        // UI 업데이트
         document.getElementById('loading3').classList.remove('visible');
         document.getElementById('finalImg').src = 'data:image/jpeg;base64,' + originalB64;
-        
+
         const dlLinks = document.getElementById('downloadLinks');
         dlLinks.innerHTML = `
             <a href="/download/${result.sid}/pptx">📥 PPTX 다운로드</a>
@@ -255,175 +1073,7 @@ All Korean text must be accurate and readable.`;
     }
 }
 
-// ============================================================
-// Puter FormData 빌더
-// ============================================================
-function buildPuterFormData() {
-    const formData = new FormData();
-    
-    if (selectedPreset === 'custom') {
-        formData.append('size_type', 'custom');
-        const unit = document.getElementById('customUnit').value;
-        let w = parseFloat(document.getElementById('customWidth').value);
-        let h = parseFloat(document.getElementById('customHeight').value);
-        if (unit === 'm') { w *= 100; h *= 100; }
-        if (unit === 'mm') { w /= 10; h /= 10; }
-        formData.append('custom_width', w);
-        formData.append('custom_height', h);
-    } else {
-        formData.append('size_type', 'preset');
-        formData.append('preset', selectedPreset);
-    }
-
-    formData.append('style_preset', selectedStyle || 'custom');
-    formData.append('mood', document.getElementById('mood').value);
-    formData.append('title', document.getElementById('title').value);
-    formData.append('subtitle', document.getElementById('subtitle').value);
-    formData.append('date', document.getElementById('date').value);
-    formData.append('venue', document.getElementById('venue').value);
-    formData.append('organizer', document.getElementById('organizer').value);
-    formData.append('content', document.getElementById('content').value);
-    formData.append('additional', document.getElementById('additional').value);
-    formData.append('font_color', document.getElementById('fontColor').value.replace('#', ''));
-
-    // 업로드 이미지
-    uploadedImages.forEach((item, idx) => {
-        formData.append(`upload_image_${idx}`, item.file);
-        formData.append(`upload_desc_${idx}`, item.description);
-    });
-
-    // 폰트 파일
-    const fontFile = document.getElementById('fontFile').files[0];
-    if (fontFile) formData.append('font_file', fontFile);
-
-    return formData;
-}
-
-function buildPlanPrompt() {
-    const title = document.getElementById('title').value;
-    const subtitle = document.getElementById('subtitle').value;
-    const date = document.getElementById('date').value;
-    const venue = document.getElementById('venue').value;
-    const organizer = document.getElementById('organizer').value;
-    const content = document.getElementById('content').value;
-    const additional = document.getElementById('additional').value;
-    const mood = document.getElementById('mood').value;
-    
-    let info = [];
-    if (title) info.push(`제목: ${title}`);
-    if (subtitle) info.push(`부제: ${subtitle}`);
-    if (date) info.push(`날짜: ${date}`);
-    if (venue) info.push(`장소: ${venue}`);
-    if (organizer) info.push(`주관: ${organizer}`);
-    if (content) info.push(`내용: ${content}`);
-    if (additional) info.push(`추가: ${additional}`);
-    if (mood) info.push(`분위기: ${mood}`);
-    
-    return `당신은 전문 포스터 디자이너입니다. 다음 정보로 포스터 디자인을 계획해주세요.
-
-[절대 규칙]
-1. 아래 입력된 정보만 사용하세요. 전화번호, 이메일, 홈페이지 등을 임의로 만들지 마세요.
-2. 입력되지 않은 항목은 완전히 제외하세요.
-
-${info.join('\n')}
-
-다음을 포함해서 답변: 1) 전체 분위기와 색감 2) 텍스트 배치 계획 3) 추천 장식 요소`;
-}
-
-// ============================================================
-// API키 모드: 수정하기
-// ============================================================
-async function submitReviseApiKey() {
-    const feedback = document.getElementById('feedback').value.trim();
-    if (!feedback) { alert('수정할 내용을 입력해주세요!'); return; }
-
-    document.getElementById('loading2').classList.add('visible');
-    document.getElementById('loadingMsg2').textContent = '수정 중...';
-    document.getElementById('previewArea').style.display = 'none';
-
-    try {
-        const formData = new FormData();
-        formData.append('sid', currentSid);
-        formData.append('feedback', feedback);
-
-        const resp = await fetch('/api/revise', { method: 'POST', body: formData });
-        const result = await resp.json();
-        if (!result.success) throw new Error(result.error || '서버 오류');
-
-        document.getElementById('loading2').classList.remove('visible');
-        document.getElementById('sketchImg').src = 'data:image/jpeg;base64,' + result.sketch_b64;
-        document.getElementById('previewArea').style.display = 'block';
-        
-        if (result.used_model) {
-            const isLite = result.used_model.includes('lite');
-            document.getElementById('modelBadge').innerHTML = isLite
-                ? '<span class="model-badge free">무료 모델 (1K)</span>'
-                : '<span class="model-badge hq">고화질 모델</span>';
-        }
-        document.getElementById('feedback').value = '';
-
-    } catch (e) {
-        document.getElementById('loading2').classList.remove('visible');
-        document.getElementById('previewArea').style.display = 'block';
-        alert('수정 오류: ' + e.message);
-    }
-}
-
-// ============================================================
-// API키 모드: 디자인 초안 생성
-// ============================================================
-async function submitPlanApiKey() {
-    setStep(2);
-    document.getElementById('loading2').classList.add('visible');
-    document.getElementById('loadingMsg2').textContent = 'Gemini API로 디자인 중... (30초~1분)';
-    document.getElementById('previewArea').style.display = 'none';
-    document.getElementById('planText').style.display = 'none';
-    document.getElementById('feedbackArea').classList.remove('visible');
-
-    try {
-        const formData = buildApiKeyFormData();
-        const resp = await fetch('/api/plan', { method: 'POST', body: formData });
-        const result = await resp.json();
-        if (!result.success) throw new Error(result.error || '서버 오류');
-
-        currentSid = result.sid;
-        localStorage.setItem('gemini_api_key', document.getElementById('apiKey').value.trim());
-
-        document.getElementById('loading2').classList.remove('visible');
-        document.getElementById('sketchImg').src = 'data:image/jpeg;base64,' + result.sketch_b64;
-        document.getElementById('previewArea').style.display = 'block';
-        
-        if (result.used_model) {
-            const isLite = result.used_model.includes('lite');
-            document.getElementById('modelBadge').innerHTML = isLite
-                ? '<span class="model-badge free">무료 모델 (1K)</span>'
-                : '<span class="model-badge hq">고화질 모델</span>';
-        }
-        
-        document.getElementById('planText').style.display = 'block';
-        document.getElementById('planText').textContent = result.plan_text;
-        document.getElementById('feedbackArea').classList.add('visible');
-
-    } catch (e) {
-        document.getElementById('loading2').classList.remove('visible');
-        alert('오류: ' + e.message);
-        setStep(1);
-    }
-}
-
-function buildApiKeyFormData() {
-    const formData = buildPuterFormData(); // 공통 필드는 동일
-    formData.append('api_key', document.getElementById('apiKey').value.trim());
-    
-    const refFile = document.getElementById('refImage').files[0];
-    if (refFile) formData.append('reference_image', refFile);
-    
-    return formData;
-}
-
-// ============================================================
-// API키 모드: 최종 생성
-// ============================================================
+// ── API키 최종 생성 ──
 async function generateFinalApiKey() {
     setStep(3);
     document.getElementById('loading3').classList.add('visible');
@@ -440,7 +1090,7 @@ async function generateFinalApiKey() {
 
         document.getElementById('loading3').classList.remove('visible');
         document.getElementById('finalImg').src = 'data:image/jpeg;base64,' + result.reference_b64;
-        
+
         const dlLinks = document.getElementById('downloadLinks');
         dlLinks.innerHTML = `
             <a href="/download/${result.sid}/pptx">📥 PPTX 다운로드</a>
@@ -474,7 +1124,6 @@ async function generateFinalApiKey() {
 buildSizeGrid();
 buildStyleGrid();
 
-// API 키 복원
 const savedKey = localStorage.getItem('gemini_api_key');
 if (savedKey) document.getElementById('apiKey').value = savedKey;
 </script>
