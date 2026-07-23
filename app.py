@@ -1,8 +1,8 @@
 """
 app.py
 AI 포스터 생성기 — Flask 웹 서버
-v4: 절대 규칙, 부제 지원, 배경 프롬프트 개선, blank_layout 수정,
-    텍스트 중복 제거, PPTX 크기 제한, 인쇄 크기 안내
+v5: 듀얼 모드(Puter.js / API키), 자동 폴백(고화질→무료),
+    절대 규칙, 부제, 배경 프롬프트 개선, PPTX 크기 제한
 """
 
 import os
@@ -59,6 +59,185 @@ def index():
     return render_template("index.html")
 
 
+# ============================================================
+# Puter.js 모드: 이미지를 브라우저에서 생성 → 서버는 PPTX만 조립
+# ============================================================
+
+@app.route("/api/puter/plan", methods=["POST"])
+def puter_plan():
+    """Puter 모드: 클라이언트가 보낸 텍스트 계획과 스케치를 저장"""
+    try:
+        data = request.form.to_dict()
+        sid = str(uuid.uuid4())
+
+        if data.get("size_type") == "custom":
+            size = get_size_info(
+                custom_w=float(data["custom_width"]),
+                custom_h=float(data["custom_height"]),
+            )
+        else:
+            size = get_size_info(preset_key=data["preset"])
+
+        style_key = data.get("style_preset", "custom")
+        if style_key in STYLE_PRESETS and style_key != "custom":
+            style_name = STYLE_PRESETS[style_key]["name"]
+        else:
+            style_name = "커스텀"
+
+        poster_info = {
+            "title": data.get("title", ""),
+            "subtitle": data.get("subtitle", ""),
+            "date": data.get("date", ""),
+            "venue": data.get("venue", ""),
+            "content": data.get("content", ""),
+            "organizer": data.get("organizer", ""),
+            "mood": data.get("mood", ""),
+            "style_name": style_name,
+            "style_preset": style_key,
+            "additional": data.get("additional", ""),
+            "size_name": size["name"],
+            "gemini_ratio": size["gemini_ratio"],
+            "font_color": data.get("font_color", "FFFFFF"),
+        }
+
+        # 스케치 이미지 (Base64로 전달받음)
+        sketch_b64 = data.get("sketch_b64", "")
+        plan_text = data.get("plan_text", "")
+
+        store = get_store(sid)
+        store["poster_info"] = poster_info
+        store["size"] = size
+        store["plan_text"] = plan_text
+        store["mode"] = "puter"
+        if sketch_b64:
+            store["sketch_bytes"] = base64.b64decode(sketch_b64)
+
+        # 업로드 이미지 처리
+        upload_images = []
+        idx = 0
+        while True:
+            file_key = f"upload_image_{idx}"
+            desc_key = f"upload_desc_{idx}"
+            if file_key not in request.files:
+                break
+            f = request.files[file_key]
+            if f.filename:
+                img_bytes = f.read()
+                desc = data.get(desc_key, f"이미지 {idx+1}")
+                upload_images.append({
+                    "image_bytes": img_bytes,
+                    "description": desc,
+                    "filename": f.filename,
+                })
+            idx += 1
+        store["upload_images"] = upload_images
+
+        font_name = "맑은 고딕"
+        if "font_file" in request.files:
+            f = request.files["font_file"]
+            if f.filename:
+                font_name = os.path.splitext(f.filename)[0]
+        store["font_name"] = font_name
+
+        return jsonify({"success": True, "sid": sid})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/puter/generate", methods=["POST"])
+def puter_generate():
+    """Puter 모드: 브라우저에서 생성한 이미지를 받아 PPTX 조립"""
+    try:
+        data = request.form.to_dict()
+        sid = data["sid"]
+
+        store = get_store(sid)
+        if not store or "poster_info" not in store:
+            return jsonify({"success": False, "error": "세션이 만료되었습니다."}), 400
+
+        info = store["poster_info"]
+        size = store["size"]
+
+        # 브라우저에서 생성한 이미지 (Base64)
+        original_b64 = data.get("original_b64", "")
+        background_b64 = data.get("background_b64", "")
+
+        if not original_b64 or not background_b64:
+            return jsonify({"success": False, "error": "이미지가 전달되지 않았습니다."}), 400
+
+        original_bytes = base64.b64decode(original_b64)
+        background_bytes = base64.b64decode(background_b64)
+
+        # 텍스트 배치
+        w = size["width_cm"]
+        h = size["height_cm"]
+        MAX_CM = 142.0
+        pptx_scale = 1.0
+        if w > MAX_CM or h > MAX_CM:
+            pptx_scale = min(MAX_CM / w, MAX_CM / h)
+        pw = w * pptx_scale
+        ph = h * pptx_scale
+        margin = min(pw, ph) * 0.05
+        font_name = store.get("font_name", "맑은 고딕")
+        font_color = info.get("font_color", "FFFFFF")
+
+        texts = _build_texts(info, pw, ph, margin, font_name, font_color)
+
+        upload_for_pptx = _build_upload_images(store, pw, ph, margin)
+
+        poster_title = safe_filename(info.get("title", "poster"))
+        actual_w = size["width_cm"] if pptx_scale < 1.0 else None
+        actual_h = size["height_cm"] if pptx_scale < 1.0 else None
+
+        pptx_buffer = create_poster_pptx(
+            width_cm=w, height_cm=h,
+            background_bytes=background_bytes,
+            original_bytes=original_bytes,
+            reference_bytes=original_bytes,
+            texts=texts,
+            upload_images=upload_for_pptx,
+            title=poster_title,
+            actual_width_cm=actual_w,
+            actual_height_cm=actual_h,
+        )
+
+        store["downloads"] = {
+            "pptx": pptx_buffer.read(),
+            "original": original_bytes,
+            "background": background_bytes,
+            "title": poster_title,
+        }
+        store["created"] = time.time()
+
+        print_info = None
+        if pptx_scale < 1.0:
+            print_info = {
+                "actual_width_cm": size["width_cm"],
+                "actual_height_cm": size["height_cm"],
+                "pptx_width_cm": round(w * pptx_scale, 2),
+                "pptx_height_cm": round(h * pptx_scale, 2),
+                "scale_percent": round(pptx_scale * 100, 1),
+            }
+
+        return jsonify({
+            "success": True,
+            "sid": sid,
+            "print_info": print_info,
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ============================================================
+# API 키 모드: 기존 서버 처리 방식
+# ============================================================
+
 @app.route("/api/plan", methods=["POST"])
 def api_plan():
     try:
@@ -75,7 +254,6 @@ def api_plan():
 
         sid = str(uuid.uuid4())
 
-        # 사이즈
         if data.get("size_type") == "custom":
             size = get_size_info(
                 custom_w=float(data["custom_width"]),
@@ -84,7 +262,6 @@ def api_plan():
         else:
             size = get_size_info(preset_key=data["preset"])
 
-        # 스타일
         style_key = data.get("style_preset", "custom")
         if style_key in STYLE_PRESETS and style_key != "custom":
             style_prompt_en = STYLE_PRESETS[style_key]["prompt_en"]
@@ -95,14 +272,12 @@ def api_plan():
 
         mood_text = data.get("mood", "")
 
-        # 참고 이미지
         ref_bytes = None
         if "reference_image" in request.files:
             f = request.files["reference_image"]
             if f.filename:
                 ref_bytes = f.read()
 
-        # 업로드 이미지
         upload_images = []
         upload_descriptions = []
         idx = 0
@@ -123,14 +298,12 @@ def api_plan():
                 upload_descriptions.append(f"{desc} ({f.filename})")
             idx += 1
 
-        # 폰트
         font_name = "맑은 고딕"
         if "font_file" in request.files:
             f = request.files["font_file"]
             if f.filename:
                 font_name = os.path.splitext(f.filename)[0]
 
-        # poster_info 구성 — 부제 포함
         poster_info = {
             "title": data.get("title", ""),
             "subtitle": data.get("subtitle", ""),
@@ -148,10 +321,9 @@ def api_plan():
             "font_color": data.get("font_color", "FFFFFF"),
         }
 
-        # 텍스트 계획
         plan_text = generate_text_plan(client, poster_info)
 
-        # ── 스케치 프롬프트 ──
+        # 스케치 프롬프트
         style_instruction = style_prompt_en
         if mood_text:
             style_instruction += f"\nAdditional mood/style: {mood_text}"
@@ -162,7 +334,6 @@ def api_plan():
             else "square layout"
         )
 
-        # 입력된 항목만 프롬프트에 포함
         has_uploads = len(upload_images) > 0
         if has_uploads:
             upload_prompt_section = f"Uploaded materials: {', '.join(upload_descriptions)}\nLeave appropriate spaces where these uploaded images would be placed."
@@ -170,20 +341,12 @@ def api_plan():
             upload_prompt_section = "No uploaded images. Do NOT leave empty spaces for logos, photos, or QR codes. Fill the entire poster with graphics and design elements."
 
         info_lines = []
-        if data.get('title'):
-            info_lines.append(f"Title: {data['title']}")
-        if data.get('subtitle'):
-            info_lines.append(f"Subtitle: {data['subtitle']}")
-        if data.get('date'):
-            info_lines.append(f"Date: {data['date']}")
-        if data.get('venue'):
-            info_lines.append(f"Venue: {data['venue']}")
-        if data.get('organizer'):
-            info_lines.append(f"Organizer: {data['organizer']}")
-        if data.get('content'):
-            info_lines.append(f"Content to include: {data['content']}")
-        if data.get('additional'):
-            info_lines.append(f"Additional creative requests: {data['additional']}")
+        for key, label in [('title','Title'), ('subtitle','Subtitle'), ('date','Date'),
+                          ('venue','Venue'), ('organizer','Organizer'),
+                          ('content','Content to include'), ('additional','Additional creative requests')]:
+            val = data.get(key, '')
+            if val and val.strip():
+                info_lines.append(f"{label}: {val}")
         info_block = "\n".join(info_lines)
 
         sketch_prompt = f"""Create a poster design draft.
@@ -204,7 +367,7 @@ Show approximate layout with colors, text positions, and decorative elements.
 Make it look like a professional poster.
 For the bottom information area, keep the background clean so text can be overlaid later."""
 
-        sketch_bytes = generate_image(
+        sketch_bytes, used_model = generate_image(
             client,
             prompt=sketch_prompt,
             aspect_ratio=size["gemini_ratio"],
@@ -212,7 +375,6 @@ For the bottom information area, keep the background clean so text can be overla
             ref_image_bytes=ref_bytes,
         )
 
-        # 세션 저장
         store = get_store(sid)
         store["api_key"] = api_key
         store["poster_info"] = poster_info
@@ -222,6 +384,7 @@ For the bottom information area, keep the background clean so text can be overla
         store["upload_images"] = upload_images
         store["font_name"] = font_name
         store["ref_bytes"] = ref_bytes
+        store["mode"] = "apikey"
 
         sketch_b64 = base64.b64encode(sketch_bytes).decode("utf-8")
 
@@ -230,6 +393,7 @@ For the bottom information area, keep the background clean so text can be overla
             "sid": sid,
             "plan_text": plan_text,
             "sketch_b64": sketch_b64,
+            "used_model": used_model,
             "size": {
                 "name": size["name"],
                 "width_cm": size["width_cm"],
@@ -244,7 +408,7 @@ For the bottom information area, keep the background clean so text can be overla
         error_msg = str(e)
         if "API key not valid" in error_msg:
             error_msg = "API 키가 유효하지 않습니다."
-        elif "quota" in error_msg.lower():
+        elif "quota" in error_msg.lower() or "429" in error_msg:
             error_msg = "API 사용량 한도에 도달했습니다. 잠시 후 다시 시도해주세요."
         elif "safety" in error_msg.lower():
             error_msg = "AI 안전 필터에 의해 차단되었습니다."
@@ -261,7 +425,7 @@ def api_revise():
 
         store = get_store(sid)
         if not store or "api_key" not in store:
-            return jsonify({"success": False, "error": "세션이 만료되었습니다. 처음부터 다시 시작해주세요."}), 400
+            return jsonify({"success": False, "error": "세션이 만료되었습니다."}), 400
 
         client = init_gemini(store["api_key"])
         size = store["size"]
@@ -295,7 +459,7 @@ Apply the requested changes while maintaining the poster's quality.
 All text in Korean.
 Keep the bottom area clean for text overlay."""
 
-        new_sketch = generate_image(
+        new_sketch, used_model = generate_image(
             client,
             prompt=revise_prompt,
             aspect_ratio=size["gemini_ratio"],
@@ -310,6 +474,7 @@ Keep the bottom area clean for text overlay."""
             "success": True,
             "sid": sid,
             "sketch_b64": sketch_b64,
+            "used_model": used_model,
         })
 
     except Exception as e:
@@ -317,7 +482,7 @@ Keep the bottom area clean for text overlay."""
         traceback.print_exc()
         error_msg = str(e)
         if "503" in error_msg or "overloaded" in error_msg.lower():
-            error_msg = "Gemini 서버가 일시적으로 과부하 상태입니다. 1~2분 후 다시 시도해주세요."
+            error_msg = "Gemini 서버 과부하입니다. 1~2분 후 다시 시도해주세요."
         return jsonify({"success": False, "error": error_msg}), 500
 
 
@@ -340,20 +505,13 @@ def api_generate():
         if info.get("mood"):
             style_instruction += f"\nMood: {info['mood']}"
 
-        # ── 1) 완성본 (원본 — 텍스트 포함) ──
+        # 1) 완성본
         final_info_lines = []
-        if info.get('title'):
-            final_info_lines.append(f"Title: {info['title']}")
-        if info.get('subtitle'):
-            final_info_lines.append(f"Subtitle: {info['subtitle']}")
-        if info.get('date'):
-            final_info_lines.append(f"Date: {info['date']}")
-        if info.get('venue'):
-            final_info_lines.append(f"Venue: {info['venue']}")
-        if info.get('organizer'):
-            final_info_lines.append(f"Organizer: {info['organizer']}")
-        if info.get('content'):
-            final_info_lines.append(f"Content: {info['content']}")
+        for key, label in [('title','Title'), ('subtitle','Subtitle'), ('date','Date'),
+                          ('venue','Venue'), ('organizer','Organizer'), ('content','Content')]:
+            val = info.get(key, '')
+            if val and val.strip():
+                final_info_lines.append(f"{label}: {val}")
         final_info_block = "\n".join(final_info_lines)
 
         final_prompt = f"""Based on this draft, create the FINAL high-quality poster.
@@ -367,14 +525,14 @@ ABSOLUTE RULE: Only include the following information. Do NOT add phone numbers,
 DESIGN STYLE: {style_instruction}
 Aspect ratio must be exactly {size['gemini_ratio']}."""
 
-        original_bytes = generate_image(
+        original_bytes, model1 = generate_image(
             client, prompt=final_prompt,
             aspect_ratio=size["gemini_ratio"],
             image_size="2K",
             ref_image_bytes=sketch,
         )
 
-        # ── 2) 배경 (모든 텍스트 제거, 디자인 요소 보존) ──
+        # 2) 배경
         bg_prompt = """Remove ALL text from this poster image.
 This includes: titles, subtitles, dates, venue names, organizer names, category labels, and any Korean/English text.
 IMPORTANT RULES:
@@ -385,130 +543,30 @@ IMPORTANT RULES:
 - Do NOT change any colors, do NOT replace design elements, do NOT add new elements.
 - The result should look like the same poster design but completely blank — ready for text to be overlaid."""
 
-        background_bytes = generate_image(
+        background_bytes, model2 = generate_image(
             client, prompt=bg_prompt,
             aspect_ratio=size["gemini_ratio"],
             image_size="2K",
             ref_image_bytes=original_bytes,
         )
 
-        # ── 3) 텍스트 배치 (스케일 적용) ──
+        # 3) 텍스트 배치
         w = size["width_cm"]
         h = size["height_cm"]
-
         MAX_CM = 142.0
         pptx_scale = 1.0
         if w > MAX_CM or h > MAX_CM:
             pptx_scale = min(MAX_CM / w, MAX_CM / h)
-
         pw = w * pptx_scale
         ph = h * pptx_scale
         margin = min(pw, ph) * 0.05
         font_name = store.get("font_name", "맑은 고딕")
         font_color = info.get("font_color", "FFFFFF")
 
-        texts = []
+        texts = _build_texts(info, pw, ph, margin, font_name, font_color)
+        upload_for_pptx = _build_upload_images(store, pw, ph, margin)
 
-        # 현재 Y 위치 추적 — 입력된 항목만 배치
-        current_y = ph * 0.05
-
-        # 제목
-        if info.get("title"):
-            title_h = ph * 0.10
-            texts.append({
-                "content": info["title"],
-                "x_cm": margin, "y_cm": current_y,
-                "width_cm": pw - margin * 2, "height_cm": title_h,
-                "font_size_pt": max(24, min(72, int(min(pw, ph) * 1.2))),
-                "font_name": font_name,
-                "font_color": font_color, "bold": True, "align": "center",
-            })
-            current_y += title_h
-
-        # 부제
-        if info.get("subtitle"):
-            sub_h = ph * 0.08
-            texts.append({
-                "content": info["subtitle"],
-                "x_cm": margin, "y_cm": current_y,
-                "width_cm": pw - margin * 2, "height_cm": sub_h,
-                "font_size_pt": max(18, min(54, int(min(pw, ph) * 0.9))),
-                "font_name": font_name,
-                "font_color": font_color, "bold": True, "align": "center",
-            })
-            current_y += sub_h
-
-        # 날짜
-        if info.get("date"):
-            date_h = ph * 0.05
-            current_y += ph * 0.02  # 약간 간격
-            texts.append({
-                "content": info["date"],
-                "x_cm": margin, "y_cm": current_y,
-                "width_cm": pw - margin * 2, "height_cm": date_h,
-                "font_size_pt": max(14, min(36, int(min(pw, ph) * 0.6))),
-                "font_name": font_name,
-                "font_color": font_color, "bold": True, "align": "center",
-            })
-            current_y += date_h
-
-        # 장소
-        if info.get("venue"):
-            venue_h = ph * 0.05
-            texts.append({
-                "content": info["venue"],
-                "x_cm": margin, "y_cm": current_y,
-                "width_cm": pw - margin * 2, "height_cm": venue_h,
-                "font_size_pt": max(12, min(30, int(min(pw, ph) * 0.5))),
-                "font_name": font_name,
-                "font_color": font_color, "bold": False, "align": "center",
-            })
-            current_y += venue_h
-
-        # 고정 멘트 — 줄바꿈 기준으로 각각 별도 텍스트 박스
-        if info.get("content"):
-            content_lines = [line.strip() for line in info["content"].split('\n') if line.strip()]
-            start_y = max(current_y + ph * 0.05, ph * 0.50)
-            line_height = ph * 0.05
-            for i, line in enumerate(content_lines):
-                texts.append({
-                    "content": line,
-                    "x_cm": margin, "y_cm": start_y + (i * line_height),
-                    "width_cm": pw - margin * 2, "height_cm": line_height,
-                    "font_size_pt": max(10, min(24, int(min(pw, ph) * 0.4))),
-                    "font_name": font_name,
-                    "font_color": font_color, "bold": False, "align": "center",
-                })
-
-        # 주관
-        if info.get("organizer"):
-            texts.append({
-                "content": f"주관: {info['organizer']}",
-                "x_cm": margin, "y_cm": ph * 0.92,
-                "width_cm": pw - margin * 2, "height_cm": ph * 0.05,
-                "font_size_pt": max(12, min(28, int(min(pw, ph) * 0.5))),
-                "font_name": font_name,
-                "font_color": font_color, "bold": True, "align": "center",
-            })
-
-        # ── 4) 업로드 이미지 배치 (있을 때만) ──
-        upload_for_pptx = []
-        if store.get("upload_images"):
-            for i, img in enumerate(store["upload_images"]):
-                img_w = min(pw * 0.15, 8)
-                img_h = img_w
-                upload_for_pptx.append({
-                    "image_bytes": img["image_bytes"],
-                    "description": img["description"],
-                    "x_cm": pw - margin - img_w - (i * (img_w + 1)),
-                    "y_cm": ph - margin - img_h,
-                    "width_cm": img_w,
-                    "height_cm": img_h,
-                })
-
-        # ── 5) PPTX 생성 ──
         poster_title = safe_filename(info.get("title", "poster"))
-
         actual_w = size["width_cm"] if pptx_scale < 1.0 else None
         actual_h = size["height_cm"] if pptx_scale < 1.0 else None
 
@@ -534,6 +592,12 @@ IMPORTANT RULES:
 
         ref_b64 = base64.b64encode(original_bytes).decode("utf-8")
 
+        # 사용된 모델 정보
+        used_models = set(filter(None, [model1, model2]))
+        quality_note = ""
+        if "gemini-3.1-flash-lite-image" in used_models:
+            quality_note = "무료 모델(1K)이 사용되었습니다. 유료 티어에서는 고화질(2K) 이미지가 생성됩니다."
+
         print_info = None
         if pptx_scale < 1.0:
             print_info = {
@@ -549,19 +613,123 @@ IMPORTANT RULES:
             "sid": sid,
             "reference_b64": ref_b64,
             "print_info": print_info,
+            "quality_note": quality_note,
         })
 
     except Exception as e:
         import traceback
         traceback.print_exc()
         error_msg = str(e)
-        if "quota" in error_msg.lower():
+        if "quota" in error_msg.lower() or "429" in error_msg:
             error_msg = "API 사용량 한도에 도달했습니다."
         elif "safety" in error_msg.lower():
             error_msg = "AI 안전 필터에 의해 차단되었습니다."
         elif "503" in error_msg or "overloaded" in error_msg.lower():
             error_msg = "Gemini 서버 과부하입니다. 1~2분 후 다시 시도해주세요."
         return jsonify({"success": False, "error": error_msg}), 500
+
+
+# ============================================================
+# 공통 헬퍼 함수
+# ============================================================
+
+def _build_texts(info, pw, ph, margin, font_name, font_color):
+    """입력된 항목만 텍스트 박스 목록으로 생성"""
+    texts = []
+    current_y = ph * 0.05
+
+    if info.get("title"):
+        title_h = ph * 0.10
+        texts.append({
+            "content": info["title"],
+            "x_cm": margin, "y_cm": current_y,
+            "width_cm": pw - margin * 2, "height_cm": title_h,
+            "font_size_pt": max(24, min(72, int(min(pw, ph) * 1.2))),
+            "font_name": font_name,
+            "font_color": font_color, "bold": True, "align": "center",
+        })
+        current_y += title_h
+
+    if info.get("subtitle"):
+        sub_h = ph * 0.08
+        texts.append({
+            "content": info["subtitle"],
+            "x_cm": margin, "y_cm": current_y,
+            "width_cm": pw - margin * 2, "height_cm": sub_h,
+            "font_size_pt": max(18, min(54, int(min(pw, ph) * 0.9))),
+            "font_name": font_name,
+            "font_color": font_color, "bold": True, "align": "center",
+        })
+        current_y += sub_h
+
+    if info.get("date"):
+        date_h = ph * 0.05
+        current_y += ph * 0.02
+        texts.append({
+            "content": info["date"],
+            "x_cm": margin, "y_cm": current_y,
+            "width_cm": pw - margin * 2, "height_cm": date_h,
+            "font_size_pt": max(14, min(36, int(min(pw, ph) * 0.6))),
+            "font_name": font_name,
+            "font_color": font_color, "bold": True, "align": "center",
+        })
+        current_y += date_h
+
+    if info.get("venue"):
+        venue_h = ph * 0.05
+        texts.append({
+            "content": info["venue"],
+            "x_cm": margin, "y_cm": current_y,
+            "width_cm": pw - margin * 2, "height_cm": venue_h,
+            "font_size_pt": max(12, min(30, int(min(pw, ph) * 0.5))),
+            "font_name": font_name,
+            "font_color": font_color, "bold": False, "align": "center",
+        })
+        current_y += venue_h
+
+    if info.get("content"):
+        content_lines = [line.strip() for line in info["content"].split('\n') if line.strip()]
+        start_y = max(current_y + ph * 0.05, ph * 0.50)
+        line_height = ph * 0.05
+        for i, line in enumerate(content_lines):
+            texts.append({
+                "content": line,
+                "x_cm": margin, "y_cm": start_y + (i * line_height),
+                "width_cm": pw - margin * 2, "height_cm": line_height,
+                "font_size_pt": max(10, min(24, int(min(pw, ph) * 0.4))),
+                "font_name": font_name,
+                "font_color": font_color, "bold": False, "align": "center",
+            })
+
+    if info.get("organizer"):
+        texts.append({
+            "content": f"주관: {info['organizer']}",
+            "x_cm": margin, "y_cm": ph * 0.92,
+            "width_cm": pw - margin * 2, "height_cm": ph * 0.05,
+            "font_size_pt": max(12, min(28, int(min(pw, ph) * 0.5))),
+            "font_name": font_name,
+            "font_color": font_color, "bold": True, "align": "center",
+        })
+
+    return texts
+
+
+def _build_upload_images(store, pw, ph, margin):
+    """업로드 이미지 배치 정보 생성"""
+    upload_for_pptx = []
+    if store.get("upload_images"):
+        for i, img in enumerate(store["upload_images"]):
+            img_w = min(pw * 0.15, 8)
+            img_h = img_w
+            upload_for_pptx.append({
+                "image_bytes": img["image_bytes"],
+                "description": img["description"],
+                "x_cm": pw - margin - img_w - (i * (img_w + 1)),
+                "y_cm": ph - margin - img_h,
+                "width_cm": img_w,
+                "height_cm": img_h,
+            })
+    return upload_for_pptx
 
 
 @app.route("/download/<sid>/<file_type>")
@@ -601,7 +769,7 @@ def download_file(sid, file_type):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print("=" * 50)
-    print("  🎨 AI 포스터 생성기 v4")
+    print("  🎨 AI 포스터 생성기 v5")
     print(f"  http://localhost:{port}")
     print("=" * 50)
     app.run(debug=True, host="0.0.0.0", port=port)
